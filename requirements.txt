@@ -1,4 +1,4 @@
-pandas
+#pandas
 # Telegram Bot Framework
 aiogram==3.13.1		#aiogram==3.10.0
 python-dotenv==1.0.0	#python-dotenv==1.0.1
@@ -34,4 +34,5 @@ fastapi==0.104.1
 # Ngrok için (Opsiyonel)
 
 pyngrok==7.0.0
+
 
