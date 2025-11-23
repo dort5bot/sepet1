@@ -37,7 +37,7 @@ async def cmd_pex(message: Message, state: FSMContext):
         "📋 **KURALLAR:**\n"
         "• Dosya adı şehir adı olmalı: 'ankara.pdf', 'van.xlsx' gibi\n"
         "• Desteklenen formatlar: PDF, Excel (.xls, .xlsx)\n"
-        "• Aynı anda birden fazla dosya gönderebilirsiniz\n\n"
+        "• Dosyaları TEK TEK gönder(en iyisi bu yöntem)\n\n"
         "🔄 **İŞLEM:**\n"
         "1. Dosya adındaki şehir gruplarda aranır\n"
         "2. Eşleşen tüm gruplara dosya gönderilir\n"
@@ -87,8 +87,8 @@ async def handle_pex_file_upload(message: Message, state: FSMContext):
             f"✅ Dosya eklendi: {message.document.file_name}\n"
             f"🏙️  Algılanan şehir: {city_name.upper()}\n"
             f"📁 Toplam dosya: {len(pex_files)}\n\n"
-            "📤 **DOSYA BEKLİYORUM...**\n"
-            "Başka dosya gönderebilir veya işlemi başlatmak için '/tamam' yazın.\n\n"
+            "📤 *DOSYA BEKLİYORUM...*\n\n"
+            "Dosya varsa ekle, işlemi başlatmak için '/tamam' tıkla yaz.\n\n"
             "🛑 İptal için '/iptal' veya DUR butonu"
         )
         
