@@ -223,13 +223,14 @@ async def main():
                 logger.info("🚀 Polling modu başlatıldı...")
                 polling_task = asyncio.create_task(server.start_polling_mode())
                 
-                # Shutdown event veya polling task bitene kadar bekle
+                # ✅ DÜZELTİLMİŞ KISIM - Tüm task'lar create_task ile sarmalanmalı
+                shutdown_task = asyncio.create_task(server.shutdown_event.wait())
+                
                 done, pending = await asyncio.wait(
-                    [server.shutdown_event.wait(), polling_task],
+                    [shutdown_task, polling_task],
                     return_when=asyncio.FIRST_COMPLETED
                 )
 
-                
                 # Eğer shutdown event tetiklendiyse polling'i iptal et
                 if server.shutdown_event.is_set():
                     polling_task.cancel()
