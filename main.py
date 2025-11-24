@@ -10,6 +10,8 @@ kova - YENİ CONFIG YAPISIYLA GÜNCELLENDİ
 
 import asyncio
 import os
+import signal
+import sys
 from contextlib import asynccontextmanager
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
@@ -37,6 +39,7 @@ class BotServer:
         self.dp = None
         self.health_server = None
         self.webhook_runner = None
+        self.shutdown_event = asyncio.Event()
         
     async def initialize_bot(self) -> None:
         """Initialize bot and dispatcher"""
@@ -55,6 +58,16 @@ class BotServer:
         loader = HandlerLoader(self.dp)
         load_result = await loader.load_handlers(self.dp)
         logger.info(f"✅ Handler yükleme tamamlandı: {load_result}")
+
+    def setup_signal_handlers(self):
+        """Setup signal handlers for graceful shutdown"""
+        def signal_handler(signum, frame):
+            logger.info(f"📡 Signal alındı: {signum}, graceful shutdown başlatılıyor...")
+            self.shutdown_event.set()
+
+        # SIGTERM ve SIGINT sinyallerini yakala
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
 
     @asynccontextmanager
     async def health_check_server(self, port: int):
@@ -190,6 +203,9 @@ async def main():
     server = BotServer()
     
     try:
+        # Signal handler'ları kur
+        server.setup_signal_handlers()
+        
         # Bot'u başlat
         await server.initialize_bot()
         
@@ -200,11 +216,24 @@ async def main():
                 logger.info("🚀 Webhook modu başlatıldı...")
                 await server.start_webhook_mode()
                 
-                # Sonsuz bekleme
-                await asyncio.Event().wait()
+                # Shutdown event'ini bekle
+                await server.shutdown_event.wait()
             else:
-                # Polling modu
-                await server.start_polling_mode()
+                # Polling modu - shutdown event ile birlikte
+                logger.info("🚀 Polling modu başlatıldı...")
+                polling_task = asyncio.create_task(server.start_polling_mode())
+                
+                # Shutdown event veya polling task bitene kadar bekle
+                await asyncio.wait([server.shutdown_event.wait(), polling_task], 
+                                 return_when=asyncio.FIRST_COMPLETED)
+                
+                # Eğer shutdown event tetiklendiyse polling'i iptal et
+                if server.shutdown_event.is_set():
+                    polling_task.cancel()
+                    try:
+                        await polling_task
+                    except asyncio.CancelledError:
+                        logger.info("📡 Polling task iptal edildi")
                 
     except KeyboardInterrupt:
         logger.info("⚠️ Keyboard interrupt - Bot kapatılıyor...")
