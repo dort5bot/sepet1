@@ -1,11 +1,6 @@
 """
 Main Bot Entry Point - Optimized with HandlerLoader
 Async/Sync uyumlu, kod tekrarları temizlenmiş
-
-main.py
-
-kova - YENİ CONFIG YAPISIYLA GÜNCELLENDİ
-
 """
 
 import asyncio
@@ -27,28 +22,23 @@ from utils.logger import setup_logger, logger
 # Logger kurulumu
 setup_logger()
 
-# Port configuration - YENİ CONFIG YAPISI
-HEALTH_CHECK_PORT = 8080
-WEBHOOK_PORT = config.webhook.PORT  # config.webhook.PORT
-
 class BotServer:
     """Bot server management with async/sync harmony"""
     
     def __init__(self):
         self.bot = None
         self.dp = None
-        self.health_server = None
         self.webhook_runner = None
         self.shutdown_event = asyncio.Event()
         
     async def initialize_bot(self) -> None:
         """Initialize bot and dispatcher"""
-        if not config.bot.TELEGRAM_TOKEN:  # config.bot.TELEGRAM_TOKEN
+        if not config.bot.TELEGRAM_TOKEN:
             raise ValueError("❌ HATA: Bot token bulunamadı!")
         
         storage = MemoryStorage()
         self.bot = Bot(
-            token=config.bot.TELEGRAM_TOKEN,  # config.bot.TELEGRAM_TOKEN
+            token=config.bot.TELEGRAM_TOKEN,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         )
         self.dp = Dispatcher(storage=storage)
@@ -69,73 +59,8 @@ class BotServer:
         signal.signal(signal.SIGTERM, signal_handler)
         signal.signal(signal.SIGINT, signal_handler)
 
-
-    @asynccontextmanager
-    async def health_check_server(self, port: int):
-        """Async health check server context manager"""
-        async def handle_health_check(reader, writer):
-            """Async health check handler"""
-            try:
-                data = await reader.read(1024)
-                if not data:
-                    return
-
-                request_line = data.decode().split('\r\n')[0]
-                method, path, _ = request_line.split()
-                
-                if path == '/health':
-                    response = (
-                        "HTTP/1.1 200 OK\r\n"
-                        "Content-Type: text/plain\r\n"
-                        "Content-Length: 13\r\n\r\n"
-                        "Bot is running"
-                    )
-                    writer.write(response.encode())
-                    await writer.drain()
-                else:
-                    response = (
-                        "HTTP/1.1 404 Not Found\r\n"
-                        "Content-Type: text/plain\r\n\r\n"
-                        "Not Found"
-                    )
-                    writer.write(response.encode())
-                    await writer.drain()
-                    
-            except Exception as e:
-                logger.error(f"Health check hatası: {e}")
-                try:
-                    response = (
-                        "HTTP/1.1 500 Internal Server Error\r\n"
-                        "Content-Type: text/plain\r\n\r\n"
-                        "Error"
-                    )
-                    writer.write(response.encode())
-                    await writer.drain()
-                except Exception:
-                    pass
-            finally:
-                writer.close()
-                await writer.wait_closed()
-
-        server = await asyncio.start_server(
-            handle_health_check, 
-            "0.0.0.0", 
-            port
-        )
-        logger.info(f"✅ Health check sunucusu {port} portunda başlatıldı")
-        
-        try:
-            yield server
-        finally:
-            server.close()
-            await server.wait_closed()
-            logger.info("✅ Health check sunucusu kapatıldı")
-            
-
-
-
     async def start_webhook_mode(self) -> None:
-        """Start webhook mode with unified health check"""
+        """Start webhook mode"""
         app = web.Application()
         app["dp"] = self.dp
         app["bot"] = self.bot
@@ -143,21 +68,21 @@ class BotServer:
         # Webhook endpoint
         app.router.add_post("/webhook", self._webhook_handler)
         
-        # Unified health endpoint
+        # Health endpoint
         app.router.add_get("/health", self._health_handler)
 
         self.webhook_runner = web.AppRunner(app)
         await self.webhook_runner.setup()
         
-        site = web.TCPSite(self.webhook_runner, "0.0.0.0", WEBHOOK_PORT)
+        site = web.TCPSite(self.webhook_runner, "0.0.0.0", config.webhook.PORT)
         await site.start()
         
-        logger.info(f"🌐 Webhook sunucusu {WEBHOOK_PORT} portunda dinleniyor")
+        logger.info(f"🌐 Webhook sunucusu {config.webhook.PORT} portunda dinleniyor")
 
-        # Set webhook - YENİ CONFIG YAPISI
+        # Set webhook
         await self.bot.set_webhook(
-            url=f"{config.webhook.WEBHOOK_URL}/webhook",  # config.webhook.WEBHOOK_URL
-            secret_token=config.webhook.WEBHOOK_SECRET or None,  # config.webhook.WEBHOOK_SECRET
+            url=f"{config.webhook.WEBHOOK_URL}/webhook",
+            secret_token=config.webhook.WEBHOOK_SECRET or None,
             drop_pending_updates=True,
         )
         logger.info("✅ Webhook Telegram'a bildirildi")
@@ -166,14 +91,20 @@ class BotServer:
         """Start polling mode"""
         logger.info("🤖 Polling modu başlatılıyor...")
         await self.bot.delete_webhook(drop_pending_updates=True)
-        await self.dp.start_polling(self.bot)
+
+        try:
+            await self.dp.start_polling(self.bot)
+        except asyncio.CancelledError:
+            logger.info("📡 Polling durduruluyor...")
+            await self.dp.stop_polling()
+            raise
 
     async def _webhook_handler(self, request: web.Request) -> web.Response:
-        """Unified webhook handler"""
-        # Secret token kontrolü - YENİ CONFIG YAPISI
-        if config.webhook.WEBHOOK_SECRET:  # config.webhook.WEBHOOK_SECRET
+        """Webhook handler"""
+        # Secret token kontrolü
+        if config.webhook.WEBHOOK_SECRET:
             token = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
-            if token != config.webhook.WEBHOOK_SECRET:  # config.webhook.WEBHOOK_SECRET
+            if token != config.webhook.WEBHOOK_SECRET:
                 return web.Response(status=403, text="Forbidden")
         
         try:
@@ -185,7 +116,7 @@ class BotServer:
             return web.Response(status=500, text="error")
 
     async def _health_handler(self, request: web.Request) -> web.Response:
-        """Unified health check handler"""
+        """Health check handler"""
         return web.Response(text="Bot is running")
 
     async def shutdown(self) -> None:
@@ -213,35 +144,31 @@ async def main():
         # Bot'u başlat
         await server.initialize_bot()
         
-        # Health check server'ı context manager ile başlat
-        async with server.health_check_server(HEALTH_CHECK_PORT):
-            if config.webhook.USE_WEBHOOK:  # config.webhook.USE_WEBHOOK
-                # Webhook modu
-                logger.info("🚀 Webhook modu başlatıldı...")
-                await server.start_webhook_mode()
-                
-                # Shutdown event'ini bekle
-                await server.shutdown_event.wait()
-            else:
-                # Polling modu - shutdown event ile birlikte
-                logger.info("🚀 Polling modu başlatıldı...")
-                polling_task = asyncio.create_task(server.start_polling_mode())
-                
-                # ✅ DÜZELTİLMİŞ KISIM - Tüm task'lar create_task ile sarmalanmalı
-                shutdown_task = asyncio.create_task(server.shutdown_event.wait())
-                
-                done, pending = await asyncio.wait(
-                    [shutdown_task, polling_task],
-                    return_when=asyncio.FIRST_COMPLETED
-                )
+        if config.webhook.USE_WEBHOOK:
+            # Webhook modu
+            logger.info("🚀 Webhook modu başlatıldı...")
+            await server.start_webhook_mode()
+            
+            # Shutdown event'ini bekle
+            await server.shutdown_event.wait()
+        else:
+            # Polling modu - shutdown event ile birlikte
+            logger.info("🚀 Polling modu başlatıldı...")
+            polling_task = asyncio.create_task(server.start_polling_mode())
+            shutdown_task = asyncio.create_task(server.shutdown_event.wait())
 
-                # Eğer shutdown event tetiklendiyse polling'i iptal et
-                if server.shutdown_event.is_set():
-                    polling_task.cancel()
-                    try:
-                        await polling_task
-                    except asyncio.CancelledError:
-                        logger.info("📡 Polling task iptal edildi")
+            done, pending = await asyncio.wait(
+                [shutdown_task, polling_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            if shutdown_task in done:  # shutdown tetiklenmiş
+                logger.info("📡 Shutdown sinyali geldi, polling task iptal ediliyor...")
+                polling_task.cancel()
+                try:
+                    await polling_task
+                except asyncio.CancelledError:
+                    logger.info("📡 Polling task başarıyla iptal edildi")
                 
     except KeyboardInterrupt:
         logger.info("⚠️ Keyboard interrupt - Bot kapatılıyor...")
