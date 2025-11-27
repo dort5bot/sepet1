@@ -1,14 +1,12 @@
 # handlers/pex_handler.py
 """
-PEX Handler Module
-Dosya adı bazlı dağıtım işlemleri
+PEX Handler Module - GÜNCELLENMİŞ VERSİYON
+Dosya adı bazlı dağıtım işlemleri (ZIP'siz doğrudan gönderim)
 
-17-11-2025
+version: 27-11-2025
 """
-import tempfile
-import zipfile
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
@@ -17,7 +15,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 from config import config
 from utils.group_manager import group_manager
-from utils.mailer import send_email_with_attachment
+from utils.mailer import send_email_with_multiple_attachments
 from utils.logger import logger
 
 # Handler loader uyumlu router tanımı
@@ -47,7 +45,6 @@ async def cmd_pex(message: Message, state: FSMContext):
         "🛑 İptal etmek için '/iptal' komutunu kullanın veya DUR butonuna basın."
     )
 
-
 @router.message(PexProcessingStates.waiting_for_files, F.document)
 async def handle_pex_file_upload(message: Message, state: FSMContext):
     """PEX dosyalarını işler"""
@@ -67,7 +64,7 @@ async def handle_pex_file_upload(message: Message, state: FSMContext):
         current_data = await state.get_data()
         pex_files = current_data.get('pex_files', [])
         
-        # Dosyayı indir - DÜZELTİLDİ: config.paths.INPUT_DIR
+        # Dosyayı indir 
         file_info = await message.bot.get_file(message.document.file_id)
         file_path = config.paths.INPUT_DIR / message.document.file_name
         
@@ -88,18 +85,17 @@ async def handle_pex_file_upload(message: Message, state: FSMContext):
             f"🏙️  Algılanan şehir: {city_name.upper()}\n"
             f"📁 Toplam dosya: {len(pex_files)}\n\n"
             "📤 *DOSYA BEKLİYORUM...*\n\n"
-            "Dosya varsa ekle, işlemi başlatmak için '/tamam' tıkla yaz.\n\n"
+            "Dosya varsa ekle, işlemi başlatmak için '/tamam' yazın.\n\n"
             "🛑 İptal için '/iptal' veya DUR butonu"
         )
         
     except Exception as e:
         logger.error(f"PEX dosya işleme hatası: {e}")
         await message.answer("❌ Dosya işlenirken hata oluştu.")
-        
 
 @router.message(PexProcessingStates.waiting_for_files, F.text == "/tamam")
 async def handle_process_pex(message: Message, state: FSMContext):
-    """PEX işlemini başlat"""
+    """PEX işlemini başlat - GÜNCELLENDİ"""
     data = await state.get_data()
     pex_files = data.get('pex_files', [])
     
@@ -111,31 +107,34 @@ async def handle_process_pex(message: Message, state: FSMContext):
     await message.answer("⏳ Dosyalar gruplara dağıtılıyor ve mailler hazırlanıyor...")
     
     try:
-        # Dosyaları gruplara göre işle
+        # 1. Gruplara dağıtım (TEK MAIL - ÇOKLU DOSYA)
         result = await _process_pex_distribution(pex_files)
         
+        # 2. Input email'e TÜM DOSYALARI TEK MAIL olarak gönder
+        input_email_sent = False
+        if pex_files and config.email.INPUT_EMAIL:
+            input_email_sent = await _send_all_files_to_input_email(pex_files)
+        
         if result["success"]:
-            report = await _generate_pex_report(result)  # ✅ await eklendi
+            report = await _generate_pex_report(result, input_email_sent, len(pex_files))
             await message.answer(report)
         else:
             await message.answer(f"❌ İşlem başarısız: {result.get('error', 'Bilinmeyen hata')}")
         
     except Exception as e:
+        logger.error(f"PEX işleme hatası: {e}")
         await message.answer("❌ PEX işleme sırasında hata oluştu.")
     finally:
         await _cleanup_pex_files(pex_files)
         await state.clear()
 
-
-
-# 🆕 PEX STATE'İNDE TÜM İPTAL KOMUTLARI VE BUTONLARI
+# İptal komutları ve butonları
 @router.message(PexProcessingStates.waiting_for_files, F.text.in_(["/dur", "/stop", "/cancel", "/iptal"]))
 async def handle_pex_cancel_commands(message: Message, state: FSMContext):
     """PEX modunda iptal komutları"""
     from handlers.reply_handler import cancel_all_operations
     await cancel_all_operations(message, state)
 
-# 🆕 BUTON MESAJLARI İÇİN AYRI HANDLER
 @router.message(PexProcessingStates.waiting_for_files, F.text == "🛑 DUR")
 async def handle_pex_cancel_button(message: Message, state: FSMContext):
     """PEX modunda DUR butonu"""
@@ -153,151 +152,109 @@ async def handle_wrong_pex_input(message: Message):
         "🛑 İptal etmek için '/iptal' komutunu kullanın veya DUR butonuna basın."
     )
 
-
 async def _process_pex_distribution(pex_files: List[Dict]) -> Dict:
-    """PEX dosyalarını gruplara dağıtır"""
+    """PEX dosyalarını gruplara dağıtır - TEK MAIL ÇOKLU DOSYA"""
     try:
-        # 1. Dosyaları şehirlere göre gruplandır
-        city_to_files = _group_files_by_city(pex_files)
+        email_results = []
+        groups_processed = set()
         
-        # 2. Her şehir için ilgili grupları bul - DÜZELTİLDİ
-        group_to_files = await _map_groups_to_files(city_to_files)
-        
-        if not group_to_files:
-            return {"success": False, "error": "Hiçbir grup bulunamadı"}
-        
-        # 3. Her grup için dosyaları birleştir ve mail gönder
-        email_results = await _process_group_distributions(group_to_files)
+        # Her şehir için grupları bul ve dosyaları gönder
+        for city_name in {f['city_name'] for f in pex_files}:
+            normalized_city = group_manager.normalize_city_name(city_name)
+            group_ids = await group_manager.get_groups_for_city(normalized_city)
+            
+            # Bu şehre ait tüm dosyaları bul
+            city_files = [f for f in pex_files if f['city_name'] == city_name]
+            
+            for group_id in group_ids:
+                group_info = await group_manager.get_group_info(group_id)
+                recipients = group_info.get("email_recipients", [])
+                
+                if recipients:
+                    # Gruba bu şehrin tüm dosyalarını TEK MAIL olarak gönder
+                    success = await _send_group_files_single_mail(city_files, group_info, recipients)
+                    
+                    groups_processed.add(group_id)
+                    
+                    # Sonuçları kaydet
+                    for recipient in recipients:
+                        email_results.append({
+                            "success": success,
+                            "group_id": group_id,
+                            "recipient": recipient,
+                            "file_count": len(city_files),
+                            "city": city_name
+                        })
         
         return {
             "success": True,
-            "processed_files": len(pex_files),
-            "groups_processed": len(group_to_files),
             "email_results": email_results,
-            "group_details": group_to_files
+            "groups_processed": list(groups_processed)
         }
         
     except Exception as e:
         logger.error(f"PEX dağıtım hatası: {e}")
         return {"success": False, "error": str(e)}
 
-def _group_files_by_city(pex_files: List[Dict]) -> Dict[str, List[Dict]]:
-    """Dosyaları şehir adlarına göre gruplandırır"""
-    city_to_files = {}
-    for file_info in pex_files:
-        city_name = file_info['city_name']
-        if city_name not in city_to_files:
-            city_to_files[city_name] = []
-        city_to_files[city_name].append(file_info)
-    return city_to_files
-
-
-async def _map_groups_to_files(city_to_files: Dict[str, List[Dict]]) -> Dict[str, List[Dict]]:
-    """Şehir-grup eşleştirmesi yapar"""
-    group_to_files = {}
-    
-    for city_name, file_list in city_to_files.items():
-        normalized_city = group_manager.normalize_city_name(city_name)
-        # ✅ DOĞRU: Async metot await ile çağrılıyor
-        group_ids = await group_manager.get_groups_for_city(normalized_city)
-        
-        for group_id in group_ids:
-            if group_id not in group_to_files:
-                group_to_files[group_id] = []
-            group_to_files[group_id].extend(file_list)
-    
-    return group_to_files
-
-
-async def _process_group_distributions(group_to_files: Dict[str, List[Dict]]) -> List[Dict]:
-    """Gruplara dosya dağıtımını işler"""
-    email_results = []
-    
-    for group_id, file_list in group_to_files.items():
-        if not file_list:
-            continue
-            
-        # ✅ DOĞRU: Async metot await ile çağrılıyor
-        group_info = await group_manager.get_group_info(group_id)
-        recipients = group_info.get("email_recipients", [])
-        
-        if not recipients:
-            continue
-        
-        # Dosyaları ZIP yap ve mail gönder
-        result = await _send_group_files(file_list, group_info, recipients)
-        if result:
-            email_results.extend(result)
-    
-    return email_results
-    
-
-# Grup dosyalarını ZIP yaparak mail gönderir
-async def _send_group_files(file_list: List[Dict], group_info: Dict, recipients: List[str]) -> List[Dict]:
-    """Grup dosyalarını ZIP yaparak mail gönderir"""
+async def _send_group_files_single_mail(file_list: List[Dict], group_info: Dict, recipients: List[str]) -> bool:
+    """Gruba tüm dosyaları TEK MAIL olarak gönderir"""
     try:
-        zip_path = await _create_pex_zip(file_list, group_info)
-        if not zip_path:
-            logger.error("❌ ZIP dosyası oluşturulamadı")
-            return []
+        if not file_list:
+            return False
+            
+        group_name = group_info.get("group_name", "Grup")
+        file_paths = [f['path'] for f in file_list if f['path'].exists()]
         
-        # DEBUG: ZIP kontrolü
-        logger.info(f"🔍 DEBUG - ZIP oluşturuldu: {zip_path}, exists: {zip_path.exists()}")
+        if not file_paths:
+            logger.warning("❌ Gönderilecek dosya bulunamadı")
+            return False
         
         # Mail içeriği hazırla
-        subject, body = _prepare_email_content(file_list, group_info)
+        subject, body = _prepare_group_email_content(file_list, group_info)
         
-        # DEBUG: Mail bilgileri
-        #logger.info(f"🔍 DEBUG - Mail hazırlanıyor:")
-        #logger.info(f"🔍 DEBUG - Alıcılar: {recipients}")
-        #logger.info(f"🔍 DEBUG - Konu: {subject}")
-        #logger.info(f"🔍 DEBUG - Grup: {group_info.get('group_name')}")
-        
-        # Mail gönder
-        success = await send_email_with_attachment(
-            recipients, subject, body, zip_path
+        # Çoklu dosya ile TEK mail gönder
+        success = await send_email_with_multiple_attachments(
+            recipients, subject, body, file_paths
         )
         
-        # DEBUG: Mail sonucu
-        logger.info(f"🔍 DEBUG - Mail gönderim sonucu: {success}")
-        
-        # Sonuçları hazırla
-        results = []
-        for recipient in recipients:
-            results.append({
-                "success": success,
-                "group_id": group_info.get("group_id"),
-                "recipient": recipient,
-                "file_count": len(file_list),
-                "cities": list({f['city_name'] for f in file_list})
-            })
-        
-        # Geçici ZIP'i sil
-        zip_path.unlink(missing_ok=True)
-        return results
+        logger.info(f"{'✅' if success else '❌'} {group_name} → {len(file_list)} dosya")
+        return success
         
     except Exception as e:
-        logger.error(f"❌ _send_group_files hatası: {e}")
-        return []
+        logger.error(f"❌ Grup mail hatası: {e}")
+        return False
 
-async def _create_pex_zip(file_list: List[Dict], group_info: Dict) -> Path:
-    """Dosyaları ZIP olarak paketler"""
+async def _send_all_files_to_input_email(pex_files: List[Dict]) -> bool:
+    """Tüm dosyaları INPUT_EMAIL'e TEK MAIL olarak gönderir"""
     try:
-        group_name = group_info.get("group_name", "dosyalar")
-        zip_name = f"{group_name}_dosyalar.zip"
-        zip_path = Path(tempfile.gettempdir()) / zip_name
+        file_paths = [f['path'] for f in pex_files if f['path'].exists()]
         
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for file_info in file_list:
-                if file_info['path'].exists():
-                    zipf.write(file_info['path'], file_info['filename'])
+        if not file_paths:
+            logger.warning("❌ Input için dosya bulunamadı")
+            return False
         
-        return zip_path
-    except Exception:
-        return None
+        subject = f"📥 Telefon data şehir bazlı Input - {len(pex_files)} Dosya"
+        body = (
+            f"Merhaba,\n\n"
+            f"(PEX) Telefon data işlemi için {len(pex_files)} adet dosya ektedir.\n"
+            f"Dosyalar: {', '.join([f['filename'] for f in pex_files])}\n"
+            f"Toplam boyut: {sum(f['path'].stat().st_size for f in pex_files) / 1024:.1f} KB\n\n"
+            f"İyi çalışmalar,\nData_listesi_Hıdır"
+        )
+        
+        success = await send_email_with_multiple_attachments(
+            [config.email.INPUT_EMAIL], subject, body, file_paths
+        )
+        
+        logger.info(f"{'✅' if success else '❌'} Input mail → {len(pex_files)} dosya")
+        return success
+        
+    except Exception as e:
+        logger.error(f"❌ Input mail hatası: {e}")
+        return False
 
-def _prepare_email_content(file_list: List[Dict], group_info: Dict) -> tuple:
-    """Email içeriğini hazırlar"""
+def _prepare_group_email_content(file_list: List[Dict], group_info: Dict) -> tuple:
+    """Grup için email içeriğini hazırlar"""
     file_types = {f['extension'] for f in file_list}
     cities = {f['city_name'].upper() for f in file_list}
     group_name = group_info.get("group_name", group_info.get("group_id", "Grup"))
@@ -307,45 +264,54 @@ def _prepare_email_content(file_list: List[Dict], group_info: Dict) -> tuple:
         f"Merhaba,\n\n"
         f"{group_name} grubu için {len(file_list)} adet dosya ektedir.\n"
         f"Dosya türleri: {', '.join(file_types)}\n"
-        f"İlgili şehirler: {', '.join(cities)}\n\n"
+        f"İlgili şehirler: {', '.join(cities)}\n"
+        f"Dosyalar: {', '.join([f['filename'] for f in file_list])}\n\n"
         f"İyi çalışmalar,\nData_listesi_Hıdır"
     )
     
     return subject, body
 
-
-async def _generate_pex_report(result: Dict) -> str:  # ✅ async eklenmeli
-    """PEX işleme raporu oluşturur - DÜZELTİLDİ"""
+async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count: int) -> str:
+    """PEX işleme raporu oluşturur"""
     if not result.get("success", False):
         return f"❌ PEX işleme başarısız: {result.get('error', 'Bilinmeyen hata')}"
     
-    processed_files = result.get("processed_files", 0)
-    groups_processed = result.get("groups_processed", 0)
     email_results = result.get("email_results", [])
+    groups_processed = len(result.get("groups_processed", []))
     
     successful_emails = sum(1 for res in email_results if res.get("success", False))
     failed_emails = len(email_results) - successful_emails
     
     report_lines = [
         "✅ **PEX DAĞITIM RAPORU**",
-        f"📁 İşlenen dosya: {processed_files}",
+        f"📁 İşlenen dosya: {file_count}",
         f"👥 İşlem yapılan grup: {groups_processed}",
         f"📧 Başarılı mail: {successful_emails}",
         f"❌ Başarısız mail: {failed_emails}",
-        "",
-        "📋 **GRUP DETAYLARI:**"
+        f"📥 Input mail: {'✅ Gönderildi' if input_email_sent else '❌ Gönderilmedi'}"
     ]
     
-    # Grup bazlı detaylar - ✅ DÜZELTİLDİ
-    group_details = result.get("group_details", {})
-    for group_id, file_list in group_details.items():
-        group_info = await group_manager.get_group_info(group_id)  # ✅ await eklendi
-        group_name = group_info.get("group_name", group_id)
-        cities = {f['city_name'].upper() for f in file_list}
-        report_lines.append(f"• {group_name}: {len(file_list)} dosya ({', '.join(cities)})")
+    # Grup bazlı özet
+    if groups_processed > 0:
+        report_lines.append("")
+        report_lines.append("📋 **GRUP ÖZETİ:**")
+        
+        # Grupları şehirlere göre grupla
+        group_cities = {}
+        for res in email_results:
+            if res.get("success"):
+                group_id = res["group_id"]
+                city = res.get("city", "")
+                if group_id not in group_cities:
+                    group_cities[group_id] = set()
+                group_cities[group_id].add(city)
+        
+        for group_id, cities in group_cities.items():
+            group_info = await group_manager.get_group_info(group_id)
+            group_name = group_info.get("group_name", group_id)
+            report_lines.append(f"• {group_name}: {', '.join([c.upper() for c in cities])}")
     
     return "\n".join(report_lines)
-    
 
 async def _cleanup_pex_files(pex_files: List[Dict]):
     """Geçici PEX dosyalarını temizler"""

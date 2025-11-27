@@ -125,7 +125,7 @@ async def _send_zip_email(zip_path: Path) -> bool:
         return False
     
     try:
-        subject = "📊 Excel İşleme - Tüm Dosyalar - email"
+        subject = "📊 Rapor Tüm Dosyalar - emailh"
         body = (
             "Merhaba,\n\n"
             "Excel işleme sonucu oluşan tüm input ve output dosyaları ektedir.\n\n"
