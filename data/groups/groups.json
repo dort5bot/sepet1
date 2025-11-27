@@ -1,0 +1,36 @@
+{
+  "groups": [
+    {
+      "group_id": "grup_0",
+      "group_name": "grup_0",
+      "email_recipients": [
+        "ydf.kum@gmail.com"
+      ],
+      "cities": []
+    },
+    {
+      "group_id": "grup_1",
+      "group_name": "antalya_sube",
+      "email_recipients": [
+        "dersdep@gmail.com"
+      ],
+      "cities": [
+        "antalya_sube",
+        "Afyon",
+        "Aksaray",
+        "Ankara",
+        "Antalya",
+        "Burdur",
+        "Çankırı",
+        "Isparta",
+        "Karaman",
+        "Kayseri",
+        "Kırıkkale",
+        "Kırşehir",
+        "Konya",
+        "Uşak"
+      ]
+    }
+
+  ]
+}
