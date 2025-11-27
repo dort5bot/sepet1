@@ -86,7 +86,7 @@ def should_include_file(file_path: Path) -> bool:
         return False
     
     # Önbellek ve geçici dizinleri atla
-    if filename in ['__pycache__', 'node_modules', '.git','venv']:
+    if filename in ['__pycache__', 'node_modules', '.git','.venv']:
         return False
     
     # İzin verilen dosya isimlerini kontrol et
