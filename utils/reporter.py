@@ -56,7 +56,7 @@ async def generate_processing_report(result: Dict) -> str:
         
         # Toplu mail durumu
         if bulk_email_sent and bulk_email_recipient:
-            report_lines.append(f"• 📧 Otomatik Rapor mail: {bulk_email_recipient} ✅")
+            report_lines.append(f"• 📧 Sonuç Rapor maili: {bulk_email_recipient} ✅")
         else:
             report_lines.append("• 📧 Otomatik Rapor mail: Gönderilemedi ❌")
         

@@ -23,6 +23,8 @@ _create_bulk_zip(): ZIP dosyası oluşturma
 
 import logging 
 import aiosmtplib
+from typing import List
+
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
@@ -37,7 +39,7 @@ import ssl
 # Logger tanımla
 logger = logging.getLogger(__name__) 
 
-
+# TEK dosya ekli e-posta gönderir
 async def send_email_with_attachment(
     to_emails: list,
     subject: str,
@@ -157,6 +159,86 @@ async def send_email_with_attachment(
     return successful
 
 
+# Çoklu dosya ekli e-posta gönderir
+async def send_email_with_multiple_attachments(
+    to_emails: list,
+    subject: str,
+    body: str,
+    attachment_paths: List[Path],
+    max_retries: int = 2
+) -> bool:
+    """Çoklu dosya ekli e-posta gönderir"""
+    
+    if not to_emails or not any(to_emails):
+        logger.warning("Alıcı email adresi yok")
+        return False
+    
+    ssl_context = ssl.create_default_context()
+    successful = False
+    
+    for port in config.email.SMTP_PORTS:
+        for attempt in range(max_retries + 1):
+            try:
+                logger.info(f"📧 Çoklu mail gönderimi: {to_emails}, Dosya: {len(attachment_paths)}")
+                
+                message = MIMEMultipart()
+                message["From"] = config.email.SMTP_USERNAME
+                message["To"] = ", ".join(to_emails)
+                message["Subject"] = subject
+                
+                # Mesaj gövdesi
+                message.attach(MIMEText(body, "plain", "utf-8"))
+                
+                # Tüm dosyaları ekle
+                for attachment_path in attachment_paths:
+                    if attachment_path.exists():
+                        with open(attachment_path, "rb") as f:
+                            attachment = MIMEApplication(f.read())
+                            attachment.add_header(
+                                "Content-Disposition",
+                                "attachment",
+                                filename=attachment_path.name
+                            )
+                            message.attach(attachment)
+                
+                # SMTP bağlantısı
+                if port == 465:
+                    async with aiosmtplib.SMTP(
+                        hostname=config.email.SMTP_SERVER,
+                        port=465,
+                        use_tls=True,
+                        tls_context=ssl_context
+                    ) as server:
+                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)
+                        await server.send_message(message)
+                else:
+                    async with aiosmtplib.SMTP(
+                        hostname=config.email.SMTP_SERVER,
+                        port=587,
+                        start_tls=True,
+                        use_tls=False,
+                        tls_context=ssl_context
+                    ) as server:
+                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)
+                        await server.send_message(message)
+                
+                logger.info(f"✅ Çoklu mail BAŞARIYLA gönderildi: {len(attachment_paths)} dosya")
+                successful = True
+                break
+                
+            except Exception as e:
+                logger.error(f"❌ Çoklu mail hatası: {e}")
+                if attempt < max_retries:
+                    import asyncio
+                    await asyncio.sleep(2 ** attempt)
+        
+        if successful:
+            break
+    
+    return successful
+    
+
+
 # PERSONAL_EMAIL > input+outpu =zip > gider > env de tanımlı = ersin >PERSONAL_EMAIL 
 async def send_automatic_bulk_email(input_path: Path, output_files: dict) -> bool:
     """Otomatik toplu mail gönderimi"""
@@ -195,7 +277,6 @@ async def send_automatic_bulk_email(input_path: Path, output_files: dict) -> boo
         logger.error(f"Toplu mail hatası: {e}")
         return False
 
-
 async def _create_bulk_zip(input_path: Path, output_files: dict) -> Path:
     """Toplu mail için ZIP oluştur"""
     try:
@@ -215,4 +296,43 @@ async def _create_bulk_zip(input_path: Path, output_files: dict) -> Path:
     except Exception as e:
         logger.error(f"ZIP oluşturma hatası: {e}")
         return None
+       
+       
+# SADECE input dosyasını INPUT_EMAIL'e gönderir (isteğe bağlı)
+# ZIP yapmadan gönderim ÇOK DAHA KOLAY!
+async def send_input_only_email(input_path: Path) -> bool:
+    """SADECE input dosyasını INPUT_EMAIL'e direkt gönderir (ZIP'siz)"""
+    try:
+        # 🆕 SADECE INPUT_EMAIL kontrolü
+        if not config.email.INPUT_EMAIL:
+            logger.info("ℹ️ INPUT_EMAIL tanımlı değil, input mail gönderilmedi")
+            return False
+            
+        if not input_path.exists():
+            logger.error(f"❌ Input dosyası bulunamadı: {input_path}")
+            return False
+            
+        logger.info(f"📤 Sadece input dosyası gönderiliyor: {config.email.INPUT_EMAIL}")
+
+        subject = f"📥 Telefon data Dosyası - {input_path.name}"
+        body = (
+            f"Merhaba,\n\n"
+            f"Telefon data dosyası ektedir.\n"
+            f"Dosya: {input_path.name}\n\n"
+            f"İyi çalışmalar,\nData_listesi_Hıdır"
+        )
+
+        # 🆕 ZIP YOK - direkt dosyayı gönder
+        success = await send_email_with_attachment(
+            [config.email.INPUT_EMAIL],
+            subject, 
+            body, 
+            input_path  # 🆕 Direkt dosya yolu
+        )
+            
+        logger.info(f"✅ Input mail {'gönderildi' if success else 'gönderilemedi'}")
+        return success
         
+    except Exception as e:
+        logger.error(f"❌ Input mail hatası: {e}")
+        return False

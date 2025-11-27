@@ -33,7 +33,7 @@ from datetime import datetime
 from config import config
 from utils.excel_cleaner import AsyncExcelCleaner
 from utils.excel_splitter import split_excel_by_groups
-from utils.mailer import send_email_with_attachment, send_automatic_bulk_email
+from utils.mailer import send_email_with_attachment, send_automatic_bulk_email, send_input_only_email
 from utils.group_manager import group_manager
 from utils.logger import logger
 
@@ -45,6 +45,9 @@ async def process_excel_task(input_path: Path, user_id: int) -> Dict[str, Any]:
     
     try:
         logger.info(f"📊 Excel işleme başlatıldı: {input_path.name}, Kullanıcı: {user_id}")
+
+        # 🆕 ÖNCE INPUT MAIL GÖNDER (ZIP'siz, direkt)
+        await send_input_only_email(input_path)
 
         # 1. Excel temizleme (TAM ASYNC)
         cleaning_result = await _clean_excel_headers_async(str(input_path))
