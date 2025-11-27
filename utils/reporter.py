@@ -43,7 +43,7 @@ async def generate_processing_report(result: Dict) -> str:
         report_lines = [
             "✅ **DOSYA İŞLEME RAPORU**",
             f"⏰ İşlem zamanı: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
-            f"👤 Kullanıcı ID: {user_id}",
+            #f"👤 Kullanıcı ID: {user_id}",
             "",
             "📊 **İSTATİSTİKLER:**",
             f"• Toplam satır: {total_rows}",
@@ -56,9 +56,9 @@ async def generate_processing_report(result: Dict) -> str:
         
         # Toplu mail durumu
         if bulk_email_sent and bulk_email_recipient:
-            report_lines.append(f"• 📧 Otomatik toplu mail: {bulk_email_recipient} ✅")
+            report_lines.append(f"• 📧 Otomatik Rapor mail: {bulk_email_recipient} ✅")
         else:
-            report_lines.append("• 📧 Otomatik toplu mail: Gönderilemedi ❌")
+            report_lines.append("• 📧 Otomatik Rapor mail: Gönderilemedi ❌")
         
         report_lines.extend([
             "",
@@ -150,7 +150,7 @@ async def generate_personal_email_report(result: Dict) -> str:
         report_lines = [
             "✅ **KİŞİSEL MAIL GÖNDERİM RAPORU**",
             f"⏰ İşlem zamanı: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
-            f"👤 Kullanıcı ID: {user_id}",
+            #f"👤 Kullanıcı ID: {user_id}",
             "",
             "📊 **İSTATİSTİKLER:**",
             f"• Toplam satır: {total_rows}",

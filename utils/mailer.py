@@ -1,7 +1,7 @@
 #Mail Gönderici (utils/mailer.py)
 # Mailer Kodunu Güncelleyin (Detaylı Loglama):
 """
-20-11-25
+versin: 27/11/2025 18:28
 Gönderen adrese görünen isim eklendi: 
 Data_listesi_Hıdır <user@domain.com>
 Mail header’larına X-Priority ve X-Mailer eklendi
@@ -103,28 +103,32 @@ async def send_email_with_attachment(
                 use_tls = port == 465  # 465 için SSL, 587 için STARTTLS
                 
                 logger.info(f"🔌 SMTP bağlantısı: {config.email.SMTP_SERVER}:{port} (TLS: {use_tls})")  # DÜZELTME
-                
-                if port == 465:
-                    # SSL bağlantısı
+
+          
+                if port == 465: # (SSL/TLS)
+                    # SSL (doğrudan TLS)
                     async with aiosmtplib.SMTP(
-                        hostname=config.email.SMTP_SERVER,  # DÜZELTME
-                        port=port,
+                        hostname=config.email.SMTP_SERVER,
+                        port=465,
                         use_tls=True,
                         tls_context=ssl_context
                     ) as server:
-                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)  # DÜZELTME
+                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)
                         await server.send_message(message)
-                
-                else:  # port 587
-                    # STARTTLS bağlantısı
+
+                else:  # 587  (STARTTLS)
                     async with aiosmtplib.SMTP(
-                        hostname=config.email.SMTP_SERVER,  # DÜZELTME
-                        port=port,
-                        use_tls=False
+                        hostname=config.email.SMTP_SERVER,
+                        port=587,
+                        start_tls=True,     # ✔ DOĞRUSU BU
+                        use_tls=False,      # ✔ BURASI FALSE KALMALI
+                        tls_context=ssl_context
                     ) as server:
-                        await server.starttls(tls_context=ssl_context)
-                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)  # DÜZELTME
+                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)
                         await server.send_message(message)
+               
+                
+                
                 
                 logger.info(f"✅ Mail BAŞARIYLA gönderildi: {to_emails}")
                 successful = True
@@ -152,6 +156,8 @@ async def send_email_with_attachment(
     
     return successful
 
+
+# PERSONAL_EMAIL > input+outpu =zip > gider > env de tanımlı = ersin >PERSONAL_EMAIL 
 async def send_automatic_bulk_email(input_path: Path, output_files: dict) -> bool:
     """Otomatik toplu mail gönderimi"""
     try:
@@ -164,10 +170,11 @@ async def send_automatic_bulk_email(input_path: Path, output_files: dict) -> boo
         if not zip_path:
             return False
 
-        subject = "📊 Excel İşleme - Tüm Dosyalar"
+        subject = "📊 Telefon data  Raporu "
         body = (
             "Merhaba,\n\n"
-            "Excel işleme sonucu oluşan tüm dosyalar ektedir.\n\n"
+            "Telefon dataları işleme sonucu oluşan tüm dosyalar ektedir.\n\n"
+            "Gelen dosya ve grup dosyaları \n"
             "İyi çalışmalar,\nData_listesi_Hıdır"
         )
 
@@ -188,10 +195,11 @@ async def send_automatic_bulk_email(input_path: Path, output_files: dict) -> boo
         logger.error(f"Toplu mail hatası: {e}")
         return False
 
+
 async def _create_bulk_zip(input_path: Path, output_files: dict) -> Path:
     """Toplu mail için ZIP oluştur"""
     try:
-        zip_path = Path(tempfile.gettempdir()) / f"bulk_{datetime.now().strftime('%m%d_%H%M')}.zip"
+        zip_path = Path(tempfile.gettempdir()) / f"Rapor_{datetime.now().strftime('%m%d_%H%M')}.zip"
         
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             # Input dosyasını ekle
@@ -201,7 +209,7 @@ async def _create_bulk_zip(input_path: Path, output_files: dict) -> Path:
             # Output dosyalarını ekle
             for group_id, file_info in output_files.items():
                 if file_info["path"].exists():
-                    zipf.write(file_info["path"], f"output/{file_info['filename']}")
+                    zipf.write(file_info["path"], file_info['filename'])
         
         return zip_path
     except Exception as e:
