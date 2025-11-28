@@ -17,6 +17,35 @@ send_email_with_attachment(): Tekil e-posta gönderimi
 send_automatic_bulk_email(): Toplu e-posta gönderimi
 _create_bulk_zip(): ZIP dosyası oluşturma
 Özellik: SMTP bağlantısı, SSL/TLS yönetimi, ek dosya işleme
+
+
+Mailer'daki Tüm Fonksiyonlar
+
+Senin mailer.py içinde 6 adet dışarıya açık fonksiyon var:
+
+🔵 1. send_simple_email
+Metin içerikli mail gönderiyor (Telegram → Mail gibi).
+
+🔵 2. send_email_with_attachment
+Tek dosya ekli mail.
+
+🔵 3. send_email_with_multiple_attachments
+Birden fazla dosya ekli mail.
+
+🔵 4. send_automatic_bulk_email
+input + output dosyaları toplayıp ZIP yapıyor → mail atıyor.
+
+🔵 5. send_input_only_email
+Sadece INPUT dosyasını gönderiyor.
+
+🟡 6. _create_bulk_zip
+(Sadece internal fonksiyon, dışarıdan kullanılmaz)
+
+Metin içerikli mail > pex > personal
+Birden fazla dosya ekli mail > hepsi
+input + output dosyaları toplayıp ZIP > kova > personal
+
+
 """
 
 # utils/mailer.py - DÜZELTİLMİŞ VERSİYON
@@ -38,6 +67,80 @@ import ssl
 
 # Logger tanımla
 logger = logging.getLogger(__name__) 
+
+
+
+# sadece metin e-posta gönderir
+async def send_simple_email(
+    to_emails: list,
+    subject: str,
+    body: str,
+    max_retries: int = 2
+) -> bool:
+    """Sadece metin içeren e-posta gönderir (ek dosyasız)"""
+    
+    if not to_emails or not any(to_emails):
+        logger.warning("Alıcı email adresi yok")
+        return False
+    
+    # SSL context oluştur
+    ssl_context = ssl.create_default_context()
+    
+    successful = False
+    
+    for port in config.email.SMTP_PORTS:
+        for attempt in range(max_retries + 1):
+            try:
+                logger.info(f"📧 Basit mail gönderimi: {to_emails}")
+                
+                message = MIMEMultipart()
+                message["From"] = config.email.SMTP_USERNAME
+                message["To"] = ", ".join(to_emails)
+                message["Subject"] = subject
+                
+                # Mesaj gövdesi (sadece metin)
+                message.attach(MIMEText(body, "plain", "utf-8"))
+                
+                # SMTP bağlantısı
+                if port == 465:
+                    async with aiosmtplib.SMTP(
+                        hostname=config.email.SMTP_SERVER,
+                        port=465,
+                        use_tls=True,
+                        tls_context=ssl_context
+                    ) as server:
+                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)
+                        await server.send_message(message)
+                else:
+                    async with aiosmtplib.SMTP(
+                        hostname=config.email.SMTP_SERVER,
+                        port=587,
+                        start_tls=True,
+                        use_tls=False,
+                        tls_context=ssl_context
+                    ) as server:
+                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)
+                        await server.send_message(message)
+                
+                logger.info(f"✅ Basit mail BAŞARIYLA gönderildi: {to_emails}")
+                successful = True
+                break
+                
+            except Exception as e:
+                logger.error(f"❌ Basit mail hatası (Port: {port}, Deneme: {attempt + 1}): {e}")
+                
+                if attempt < max_retries:
+                    import asyncio
+                    await asyncio.sleep(2 ** attempt)
+        
+        if successful:
+            break
+    
+    if not successful:
+        logger.error(f"❌❌❌ TÜM BASİT MAIL GÖNDERME DENEMELERİ BAŞARISIZ: {to_emails}")
+    
+    return successful
+
 
 # TEK dosya ekli e-posta gönderir
 async def send_email_with_attachment(
@@ -336,3 +439,6 @@ async def send_input_only_email(input_path: Path) -> bool:
     except Exception as e:
         logger.error(f"❌ Input mail hatası: {e}")
         return False
+ 
+ 
+ 
