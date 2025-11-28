@@ -15,7 +15,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 from config import config
 from utils.group_manager import group_manager
-from utils.mailer import send_email_with_multiple_attachments
+from utils.mailer import send_email_with_multiple_attachments, send_simple_email
 from utils.logger import logger
 
 # Handler loader uyumlu router tanımı
@@ -93,9 +93,11 @@ async def handle_pex_file_upload(message: Message, state: FSMContext):
         logger.error(f"PEX dosya işleme hatası: {e}")
         await message.answer("❌ Dosya işlenirken hata oluştu.")
 
+
+# handle_process_pex fonksiyonundaki mail gönderim kısmını değiştirin
 @router.message(PexProcessingStates.waiting_for_files, F.text == "/tamam")
 async def handle_process_pex(message: Message, state: FSMContext):
-    """PEX işlemini başlat - GÜNCELLENDİ"""
+    """PEX işlemini başlat - (RAPOR MAILI EKLENDİ)"""
     data = await state.get_data()
     pex_files = data.get('pex_files', [])
     
@@ -118,6 +120,18 @@ async def handle_process_pex(message: Message, state: FSMContext):
         if result["success"]:
             report = await _generate_pex_report(result, input_email_sent, len(pex_files))
             await message.answer(report)
+            
+            # 2. Raporu PERSONAL_EMAIL'e gönder (DÜZELTİLDİ)
+            if config.email.PERSONAL_EMAIL:
+                await send_simple_email(
+                    [config.email.PERSONAL_EMAIL],
+                    f"📊 PEX Raporu - {len(pex_files)} Dosya",
+                    report
+                )
+                await message.answer("✅ Rapor PERSONAL_EMAIL adresine gönderildi.")
+            else:
+                await message.answer("ℹ️ PERSONAL_EMAIL tanımlı değil, rapor maili gönderilmedi.")
+                
         else:
             await message.answer(f"❌ İşlem başarısız: {result.get('error', 'Bilinmeyen hata')}")
         
@@ -127,6 +141,8 @@ async def handle_process_pex(message: Message, state: FSMContext):
     finally:
         await _cleanup_pex_files(pex_files)
         await state.clear()
+        
+      
 
 # İptal komutları ve butonları
 @router.message(PexProcessingStates.waiting_for_files, F.text.in_(["/dur", "/stop", "/cancel", "/iptal"]))
@@ -271,6 +287,8 @@ def _prepare_group_email_content(file_list: List[Dict], group_info: Dict) -> tup
     
     return subject, body
 
+
+# PEX işleme raporu oluşturur
 async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count: int) -> str:
     """PEX işleme raporu oluşturur"""
     if not result.get("success", False):
@@ -283,7 +301,7 @@ async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count:
     failed_emails = len(email_results) - successful_emails
     
     report_lines = [
-        "✅ **PEX DAĞITIM RAPORU**",
+        "✅ **Pdf Excel Dagıtım Raporu**",
         f"📁 İşlenen dosya: {file_count}",
         f"👥 İşlem yapılan grup: {groups_processed}",
         f"📧 Başarılı mail: {successful_emails}",
