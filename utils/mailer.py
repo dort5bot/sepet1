@@ -1,444 +1,382 @@
-#Mail Gönderici (utils/mailer.py)
-# Mailer Kodunu Güncelleyin (Detaylı Loglama):
+# utils/mailer.py
 """
-versin: 27/11/2025 18:28
-Gönderen adrese görünen isim eklendi: 
-Data_listesi_Hıdır <user@domain.com>
-Mail header’larına X-Priority ve X-Mailer eklendi
-Hem plain text hem HTML body eklendi (modern e-posta uyumu için)
-Gmail spam'e düşürüyorsa, farklı bir SMTP servisi deneyin:
-Yandex Mail (smtp.yandex.com)
-Outlook/Hotmail (smtp-mail.outlook.com)
+Mailer V5 
+PRO - Stabilite Sürümü
+- Persistent SMTP connection (reconnect on failure)
+- Async queue + semaphore limiting concurrency
+- Unified send_email API with helpers that preserve Version 1 functionality
+- Robust retry with exponential backoff
+- Safe attachment handling (reads attachments per-email, no global preloading)
+- ZIP helper for input+output bundles
 
-Amaç: E-posta gönderme işlemlerini yönetir
+Usage:
 
-İşlevler:
-send_email_with_attachment(): Tekil e-posta gönderimi
-send_automatic_bulk_email(): Toplu e-posta gönderimi
-_create_bulk_zip(): ZIP dosyası oluşturma
-Özellik: SMTP bağlantısı, SSL/TLS yönetimi, ek dosya işleme
+from utils.mailer_v2_pro import MailerV2
 
+mailer = MailerV2()
+await mailer.start()            # starts/creates persistent connection(s)
+await mailer.send_simple_email([...], subject, body)
+await mailer.send_email_with_attachment([...], subject, body, Path(...))
+await mailer.send_automatic_bulk_email(input_path, output_files)
+await mailer.stop()             # clean shutdown
 
-Mailer'daki Tüm Fonksiyonlar
-
-Senin mailer.py içinde 6 adet dışarıya açık fonksiyon var:
-
-🔵 1. send_simple_email
-Metin içerikli mail gönderiyor (Telegram → Mail gibi).
-
-🔵 2. send_email_with_attachment
-Tek dosya ekli mail.
-
-🔵 3. send_email_with_multiple_attachments
-Birden fazla dosya ekli mail.
-
-🔵 4. send_automatic_bulk_email
-input + output dosyaları toplayıp ZIP yapıyor → mail atıyor.
-
-🔵 5. send_input_only_email
-Sadece INPUT dosyasını gönderiyor.
-
-🟡 6. _create_bulk_zip
-(Sadece internal fonksiyon, dışarıdan kullanılmaz)
-
-Metin içerikli mail > pex > personal
-Birden fazla dosya ekli mail > hepsi
-input + output dosyaları toplayıp ZIP > kova > personal
-
-
+Notes:
+- Configure config.email.SMTP_SERVER, SMTP_PORTS (list), SMTP_USERNAME, SMTP_PASSWORD,
+  PERSONAL_EMAIL, INPUT_EMAIL in your config module.
+- Tweak MAX_PARALLEL_SEND default if you want more/less concurrency.
+- This implementation uses a single persistent connection and a semaphore to limit parallel
+  send attempts. If you want connection pooling, it can be extended.
 """
 
-# utils/mailer.py - DÜZELTİLMİŞ VERSİYON
-
-import logging 
-import aiosmtplib
-from typing import List
-
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.application import MIMEApplication
-from pathlib import Path
-from datetime import datetime
+import asyncio
+import logging
+import ssl
+import mimetypes
 import tempfile
 import zipfile
+from pathlib import Path
+from datetime import datetime
+from typing import List, Optional, Dict, Any
+from email.message import EmailMessage
+
+import aiosmtplib
+
 from config import config
-from utils.logger import logger
-import ssl
 
-# Logger tanımla
-logger = logging.getLogger(__name__) 
+logger = logging.getLogger(__name__)
 
 
+class SMTPConnectionManager:
+    """Manages a single persistent SMTP connection with reconnection logic."""
 
-# sadece metin e-posta gönderir
-async def send_simple_email(
-    to_emails: list,
-    subject: str,
-    body: str,
-    max_retries: int = 2
-) -> bool:
-    """Sadece metin içeren e-posta gönderir (ek dosyasız)"""
-    
-    if not to_emails or not any(to_emails):
-        logger.warning("Alıcı email adresi yok")
-        return False
-    
-    # SSL context oluştur
-    ssl_context = ssl.create_default_context()
-    
-    successful = False
-    
-    for port in config.email.SMTP_PORTS:
-        for attempt in range(max_retries + 1):
-            try:
-                logger.info(f"📧 Basit mail gönderimi: {to_emails}")
-                
-                message = MIMEMultipart()
-                message["From"] = config.email.SMTP_USERNAME
-                message["To"] = ", ".join(to_emails)
-                message["Subject"] = subject
-                
-                # Mesaj gövdesi (sadece metin)
-                message.attach(MIMEText(body, "plain", "utf-8"))
-                
-                # SMTP bağlantısı
+    def __init__(self, loop: Optional[asyncio.AbstractEventLoop] = None):
+        self.loop = loop or asyncio.get_event_loop()
+        self._client: Optional[aiosmtplib.SMTP] = None
+        self._lock = asyncio.Lock()
+        self._connected_port: Optional[int] = None
+
+    async def connect(self, ports: List[int], max_retries: int = 2) -> bool:
+        """Try to connect using provided ports. Keeps one persistent client."""
+        async with self._lock:
+            if self._client and self._client.is_connected:
+                logger.debug("SMTP already connected")
+                return True
+
+            smtp_server = getattr(config.email, 'SMTP_SERVER', None)
+            username = getattr(config.email, 'SMTP_USERNAME', None)
+            password = getattr(config.email, 'SMTP_PASSWORD', None)
+
+            if not smtp_server or not username or not password:
+                logger.error("SMTP configuration missing (SERVER/USERNAME/PASSWORD)")
+                return False
+
+            ssl_context = ssl.create_default_context()
+
+            for port in ports:
+                # Determine TLS mode
                 if port == 465:
-                    async with aiosmtplib.SMTP(
-                        hostname=config.email.SMTP_SERVER,
-                        port=465,
-                        use_tls=True,
-                        tls_context=ssl_context
-                    ) as server:
-                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)
-                        await server.send_message(message)
+                    use_tls = True
+                    start_tls = False
+                elif port == 587:
+                    use_tls = False
+                    start_tls = True
                 else:
-                    async with aiosmtplib.SMTP(
-                        hostname=config.email.SMTP_SERVER,
-                        port=587,
-                        start_tls=True,
-                        use_tls=False,
-                        tls_context=ssl_context
-                    ) as server:
-                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)
-                        await server.send_message(message)
-                
-                logger.info(f"✅ Basit mail BAŞARIYLA gönderildi: {to_emails}")
-                successful = True
-                break
-                
-            except Exception as e:
-                logger.error(f"❌ Basit mail hatası (Port: {port}, Deneme: {attempt + 1}): {e}")
-                
-                if attempt < max_retries:
-                    import asyncio
-                    await asyncio.sleep(2 ** attempt)
-        
-        if successful:
-            break
-    
-    if not successful:
-        logger.error(f"❌❌❌ TÜM BASİT MAIL GÖNDERME DENEMELERİ BAŞARISIZ: {to_emails}")
-    
-    return successful
+                    use_tls = False
+                    start_tls = True
+                    logger.warning(f"Unknown SMTP port {port} specified; will attempt STARTTLS")
 
-
-# TEK dosya ekli e-posta gönderir
-async def send_email_with_attachment(
-    to_emails: list,
-    subject: str,
-    body: str,
-    attachment_path: Path,
-    max_retries: int = 2
-) -> bool:
-    """E-posta gönderir (ekli dosya ile) - DETAYLI LOGLAMALI"""
-    
-    # DEBUG: Başlangıç bilgileri
-    #logger.info(f"🔍 DEBUG - Mail gönderimi başlıyor:")
-    #logger.info(f"🔍 DEBUG - Alıcılar: {to_emails}")
-    #logger.info(f"🔍 DEBUG - Konu: {subject}")
-    #logger.info(f"🔍 DEBUG - SMTP Server: {config.email.SMTP_SERVER}")  # DÜZELTME: config.email.SMTP_SERVER
-    #logger.info(f"🔍 DEBUG - SMTP User: {config.email.SMTP_USERNAME}")  # DÜZELTME: config.email.SMTP_USERNAME
-    #logger.info(f"🔍 DEBUG - SMTP Ports: {config.email.SMTP_PORTS}")    # DÜZELTME: config.email.SMTP_PORTS
-    #logger.info(f"🔍 DEBUG - Attachment: {attachment_path}")
-    #logger.info(f"🔍 DEBUG - Attachment exists: {attachment_path.exists()}")
-    
-    if not to_emails or not any(to_emails):
-        logger.warning("Alıcı email adresi yok")
-        return False
-    
-    # SSL context oluştur
-    ssl_context = ssl.create_default_context()
-    
-    successful = False
-    
-    # DEBUG: Port listesi
-    logger.info(f"🔍 DEBUG - Denenecek portlar: {config.email.SMTP_PORTS}")  # DÜZELTME
-    
-    for port in config.email.SMTP_PORTS:  # DÜZELTME: config.email.SMTP_PORTS
-        for attempt in range(max_retries + 1):
-            try:
-                logger.info(f"📧 Mail gönderimi deneniyor: {to_emails}, Port: {port}, Deneme: {attempt + 1}")
-                
-                message = MIMEMultipart()
-                message["From"] = config.email.SMTP_USERNAME  # DÜZELTME
-                message["To"] = ", ".join(to_emails)
-                message["Subject"] = subject
-                
-                # Mesaj gövdesi
-                message.attach(MIMEText(body, "plain", "utf-8"))
-                
-                # Dosya eki
-                if attachment_path.exists():
-                    file_size = attachment_path.stat().st_size / 1024  # KB
-                    logger.info(f"📎 Eklenecek dosya: {attachment_path.name} ({file_size:.1f} KB)")
-                    
-                    with open(attachment_path, "rb") as f:
-                        attachment = MIMEApplication(f.read(), _subtype="xlsx")
-                        attachment.add_header(
-                            "Content-Disposition",
-                            "attachment",
-                            filename=attachment_path.name
+                for attempt in range(1, max_retries + 2):
+                    try:
+                        client = aiosmtplib.SMTP(
+                            hostname=smtp_server,
+                            port=port,
+                            start_tls=start_tls,
+                            use_tls=use_tls,
+                            tls_context=ssl_context,
                         )
-                        message.attach(attachment)
-                else:
-                    logger.warning(f"❌ Eklenecek dosya bulunamadı: {attachment_path}")
-                    return False
-                
-                # PORT'A GÖRE BAĞLANTI AYARLARI
-                use_tls = port == 465  # 465 için SSL, 587 için STARTTLS
-                
-                logger.info(f"🔌 SMTP bağlantısı: {config.email.SMTP_SERVER}:{port} (TLS: {use_tls})")  # DÜZELTME
+                        await client.connect()
 
-          
-                if port == 465: # (SSL/TLS)
-                    # SSL (doğrudan TLS)
-                    async with aiosmtplib.SMTP(
-                        hostname=config.email.SMTP_SERVER,
-                        port=465,
-                        use_tls=True,
-                        tls_context=ssl_context
-                    ) as server:
-                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)
-                        await server.send_message(message)
+                        # If STARTTLS, library usually handles the start; ensure login
+                        await client.login(username, password)
 
-                else:  # 587  (STARTTLS)
-                    async with aiosmtplib.SMTP(
-                        hostname=config.email.SMTP_SERVER,
-                        port=587,
-                        start_tls=True,     # ✔ DOĞRUSU BU
-                        use_tls=False,      # ✔ BURASI FALSE KALMALI
-                        tls_context=ssl_context
-                    ) as server:
-                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)
-                        await server.send_message(message)
-               
-                
-                
-                
-                logger.info(f"✅ Mail BAŞARIYLA gönderildi: {to_emails}")
-                successful = True
-                break  # Başarılı oldu, diğer portları deneme
-                
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"❌ Mail gönderme hatası (Port: {port}, Deneme: {attempt + 1}): {error_msg}")
-                
-                # Son denemede logla
-                if attempt == max_retries:
-                    logger.error(f"❌ Port {port} için tüm denemeler başarısız")
-                
-                # Bekle ve tekrar dene
-                if attempt < max_retries:
-                    wait_time = 2 ** attempt
-                    import asyncio
-                    await asyncio.sleep(wait_time)
-        
-        if successful:
-            break  # Başarılı oldu, diğer portları deneme
-    
-    if not successful:
-        logger.error(f"❌❌❌ TÜM MAIL GÖNDERME DENEMELERİ BAŞARISIZ: {to_emails}")
-    
-    return successful
+                        # assign persistent client
+                        self._client = client
+                        self._connected_port = port
+                        logger.info(f"Connected to SMTP {smtp_server}:{port}")
+                        return True
 
+                    except Exception as e:
+                        logger.error(f"SMTP connect failed {smtp_server}:{port} attempt {attempt}: {e}")
+                        if attempt < (max_retries + 1):
+                            wait = 2 ** (attempt - 1)
+                            logger.debug(f"Waiting {wait}s before retrying connection")
+                            await asyncio.sleep(wait)
+                        else:
+                            logger.error(f"All attempts failed for port {port}")
 
-# Çoklu dosya ekli e-posta gönderir
-async def send_email_with_multiple_attachments(
-    to_emails: list,
-    subject: str,
-    body: str,
-    attachment_paths: List[Path],
-    max_retries: int = 2
-) -> bool:
-    """Çoklu dosya ekli e-posta gönderir"""
-    
-    if not to_emails or not any(to_emails):
-        logger.warning("Alıcı email adresi yok")
-        return False
-    
-    ssl_context = ssl.create_default_context()
-    successful = False
-    
-    for port in config.email.SMTP_PORTS:
-        for attempt in range(max_retries + 1):
-            try:
-                logger.info(f"📧 Çoklu mail gönderimi: {to_emails}, Dosya: {len(attachment_paths)}")
-                
-                message = MIMEMultipart()
-                message["From"] = config.email.SMTP_USERNAME
-                message["To"] = ", ".join(to_emails)
-                message["Subject"] = subject
-                
-                # Mesaj gövdesi
-                message.attach(MIMEText(body, "plain", "utf-8"))
-                
-                # Tüm dosyaları ekle
-                for attachment_path in attachment_paths:
-                    if attachment_path.exists():
-                        with open(attachment_path, "rb") as f:
-                            attachment = MIMEApplication(f.read())
-                            attachment.add_header(
-                                "Content-Disposition",
-                                "attachment",
-                                filename=attachment_path.name
-                            )
-                            message.attach(attachment)
-                
-                # SMTP bağlantısı
-                if port == 465:
-                    async with aiosmtplib.SMTP(
-                        hostname=config.email.SMTP_SERVER,
-                        port=465,
-                        use_tls=True,
-                        tls_context=ssl_context
-                    ) as server:
-                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)
-                        await server.send_message(message)
-                else:
-                    async with aiosmtplib.SMTP(
-                        hostname=config.email.SMTP_SERVER,
-                        port=587,
-                        start_tls=True,
-                        use_tls=False,
-                        tls_context=ssl_context
-                    ) as server:
-                        await server.login(config.email.SMTP_USERNAME, config.email.SMTP_PASSWORD)
-                        await server.send_message(message)
-                
-                logger.info(f"✅ Çoklu mail BAŞARIYLA gönderildi: {len(attachment_paths)} dosya")
-                successful = True
-                break
-                
-            except Exception as e:
-                logger.error(f"❌ Çoklu mail hatası: {e}")
-                if attempt < max_retries:
-                    import asyncio
-                    await asyncio.sleep(2 ** attempt)
-        
-        if successful:
-            break
-    
-    return successful
-    
-
-
-# PERSONAL_EMAIL > input+outpu =zip > gider > env de tanımlı = ersin >PERSONAL_EMAIL 
-async def send_automatic_bulk_email(input_path: Path, output_files: dict) -> bool:
-    """Otomatik toplu mail gönderimi"""
-    try:
-        if not config.email.PERSONAL_EMAIL:
-            logger.error("PERSONAL_EMAIL tanımlı değil")
+            logger.error("Failed to connect to any SMTP port")
             return False
 
-        # ZIP oluştur
-        zip_path = await _create_bulk_zip(input_path, output_files)
+    async def disconnect(self) -> None:
+        async with self._lock:
+            if self._client:
+                try:
+                    await self._client.quit()
+                except Exception:
+                    try:
+                        await self._client.close()
+                    except Exception:
+                        pass
+                finally:
+                    self._client = None
+                    self._connected_port = None
+                    logger.info("SMTP client disconnected")
+
+    async def send_message(self, message: EmailMessage) -> None:
+        """Sends message using persistent client. Will try to reconnect if needed."""
+        # We'll attempt a few reconnects if send fails
+        ports = getattr(config.email, 'SMTP_PORTS', [465, 587])
+        max_retries = getattr(config.email, 'SMTP_MAX_RETRIES', 2)
+
+        # Acquire lock to avoid concurrent connects interfering with client state
+        async with self._lock:
+            # Ensure connected
+            if not (self._client and getattr(self._client, 'is_connected', False)):
+                connected = await self.connect(ports, max_retries=max_retries)
+                if not connected:
+                    raise RuntimeError("Unable to connect to SMTP server")
+
+            try:
+                await self._client.send_message(message)
+            except Exception as send_exc:
+                logger.warning(f"Send failed on existing connection: {send_exc}; attempting reconnect and retry")
+                # try reconnect and resend
+                try:
+                    await self.disconnect()
+                except Exception:
+                    pass
+
+                connected = await self.connect(ports, max_retries=max_retries)
+                if not connected:
+                    raise RuntimeError("Unable to reconnect to SMTP server after send failure")
+
+                # try one more time
+                try:
+                    await self._client.send_message(message)
+                except Exception as e:
+                    logger.error(f"Retry send after reconnect failed: {e}")
+                    raise
+
+
+class MailerV2:
+    """High-level mailer with stability features."""
+
+    DEFAULT_MAX_PARALLEL = 3
+
+    def __init__(self, max_parallel: int = None):
+        self.max_parallel = max_parallel or self.DEFAULT_MAX_PARALLEL
+        self._semaphore = asyncio.Semaphore(self.max_parallel)
+        self._conn_mgr = SMTPConnectionManager()
+        self._started = False
+
+    async def start(self) -> bool:
+        """Start the mailer (establish persistent SMTP connection)."""
+        if self._started:
+            return True
+        ports = getattr(config.email, 'SMTP_PORTS', [465, 587])
+        ok = await self._conn_mgr.connect(ports)
+        if ok:
+            self._started = True
+        return ok
+
+    async def stop(self) -> None:
+        await self._conn_mgr.disconnect()
+        self._started = False
+
+    # low-level send wrapper with semaphore and retry/backoff
+    async def _send_with_controls(self, message: EmailMessage, recipients: List[str], max_retries: int = 2) -> bool:
+        # semaphore limits parallel sends to avoid overwhelming SMTP
+        async with self._semaphore:
+            # exponential backoff for send-level retries
+            for attempt in range(1, max_retries + 2):
+                try:
+                    # ensure started
+                    if not self._started:
+                        connected = await self.start()
+                        if not connected:
+                            raise RuntimeError("Mailer not started and cannot connect")
+
+                    await self._conn_mgr.send_message(message)
+                    logger.info(f"Mail sent to {recipients}")
+                    return True
+                except Exception as e:
+                    logger.error(f"Send attempt {attempt} failed for {recipients}: {e}")
+                    if attempt < (max_retries + 1):
+                        wait = 2 ** (attempt - 1)
+                        logger.debug(f"Waiting {wait}s before next send attempt")
+                        await asyncio.sleep(wait)
+                    else:
+                        logger.error(f"All send attempts failed for {recipients}")
+                        return False
+
+    # helper to attach single file with correct MIME
+    def _attach_file_to_message(self, msg: EmailMessage, path: Path) -> None:
+        ctype, encoding = mimetypes.guess_type(str(path))
+        if ctype is None:
+            ctype = 'application/octet-stream'
+        maintype, subtype = ctype.split('/', 1)
+
+        # read file in memory per file (minimizes simultaneous memory usage)
+        # we avoid preloading many files at once by doing this per message
+        with path.open('rb') as f:
+            data = f.read()
+
+        msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=path.name)
+        logger.debug(f"Attached {path} ({ctype})")
+
+    # Public API - Version 1 compatibility functions preserved & improved
+    async def send_simple_email(self, to_emails: List[str], subject: str, body: str, max_retries: int = 2) -> bool:
+        if not to_emails or not any(to_emails):
+            logger.warning("No recipients for simple email")
+            return False
+
+        msg = EmailMessage()
+        msg['From'] = config.email.SMTP_USERNAME
+        msg['To'] = ', '.join(to_emails)
+        msg['Subject'] = subject
+        msg.set_content(body)
+
+        return await self._send_with_controls(msg, to_emails, max_retries=max_retries)
+
+    async def send_email_with_attachment(self, to_emails: List[str], subject: str, body: str, attachment_path: Path, max_retries: int = 2) -> bool:
+        if not to_emails or not any(to_emails):
+            logger.warning("No recipients")
+            return False
+        if not attachment_path or not attachment_path.exists():
+            logger.error(f"Attachment not found: {attachment_path}")
+            return False
+
+        msg = EmailMessage()
+        msg['From'] = config.email.SMTP_USERNAME
+        msg['To'] = ', '.join(to_emails)
+        msg['Subject'] = subject
+        msg.set_content(body)
+
+        # attach single file (reads file once)
+        self._attach_file_to_message(msg, attachment_path)
+
+        return await self._send_with_controls(msg, to_emails, max_retries=max_retries)
+
+    async def send_email_with_multiple_attachments(self, to_emails: List[str], subject: str, body: str, attachment_paths: List[Path], max_retries: int = 2) -> bool:
+        if not to_emails or not any(to_emails):
+            logger.warning("No recipients")
+            return False
+        if not attachment_paths:
+            logger.warning("No attachment paths provided")
+            return False
+
+        msg = EmailMessage()
+        msg['From'] = config.email.SMTP_USERNAME
+        msg['To'] = ', '.join(to_emails)
+        msg['Subject'] = subject
+        msg.set_content(body)
+
+        attached = 0
+        for p in attachment_paths:
+            if p and p.exists():
+                self._attach_file_to_message(msg, p)
+                attached += 1
+            else:
+                logger.warning(f"Attachment missing: {p}")
+
+        if attached == 0:
+            logger.error("No valid attachments to send")
+            return False
+
+        return await self._send_with_controls(msg, to_emails, max_retries=max_retries)
+
+    async def _create_bulk_zip(self, input_path: Optional[Path], output_files: Dict[str, Dict[str, Any]]) -> Optional[Path]:
+        try:
+            zip_path = Path(tempfile.gettempdir()) / f"Rapor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                if input_path and input_path.exists():
+                    zf.write(input_path, f"input/{input_path.name}")
+                    logger.debug(f"ZIP includes input: {input_path.name}")
+
+                for group_id, file_info in (output_files or {}).items():
+                    p = file_info.get('path')
+                    filename = file_info.get('filename') or (p.name if p else None)
+                    if p and p.exists():
+                        zf.write(p, filename)
+                        logger.debug(f"ZIP includes: {filename}")
+
+            logger.info(f"ZIP created at {zip_path}")
+            return zip_path
+        except Exception as e:
+            logger.error(f"ZIP creation error: {e}")
+            return None
+
+    async def send_automatic_bulk_email(self, input_path: Path, output_files: Dict[str, Dict[str, Any]], processing_report: str = "", max_retries: int = 2) -> bool:
+        personal = getattr(config.email, 'PERSONAL_EMAIL', None)
+        if not personal:
+            logger.error("PERSONAL_EMAIL not configured")
+            return False
+
+        zip_path = await self._create_bulk_zip(input_path, output_files)
         if not zip_path:
             return False
 
-        subject = "📊 Telefon data  Raporu "
+        subject = f"📊 TelData Raporu - {input_path.name}"
+        
+        # Raporu mail gövdesine ekle
         body = (
-            "Merhaba,\n\n"
-            "Telefon dataları işleme sonucu oluşan tüm dosyalar ektedir.\n\n"
-            "Gelen dosya ve grup dosyaları \n"
-            "İyi çalışmalar,\nData_listesi_Hıdır"
+            "Merhaba,\n\nTelefon dataları işleme sonucu oluşan tüm dosyalar ektedir.\n\n"
         )
-
-        success = await send_email_with_attachment(
-            [config.email.PERSONAL_EMAIL],
-            subject,
-            body,
-            zip_path
-        )
-
-        # Temizlik
-        if zip_path.exists():
-            zip_path.unlink()
-
-        return success
-
-    except Exception as e:
-        logger.error(f"Toplu mail hatası: {e}")
-        return False
-
-async def _create_bulk_zip(input_path: Path, output_files: dict) -> Path:
-    """Toplu mail için ZIP oluştur"""
-    try:
-        zip_path = Path(tempfile.gettempdir()) / f"Rapor_{datetime.now().strftime('%m%d_%H%M')}.zip"
         
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # Input dosyasını ekle
-            if input_path.exists():
-                zipf.write(input_path, f"input/{input_path.name}")
-            
-            # Output dosyalarını ekle
-            for group_id, file_info in output_files.items():
-                if file_info["path"].exists():
-                    zipf.write(file_info["path"], file_info['filename'])
+        if processing_report:
+            body += "İŞLEM RAPORU:\n" + processing_report + "\n\n"
         
-        return zip_path
-    except Exception as e:
-        logger.error(f"ZIP oluşturma hatası: {e}")
-        return None
-       
-       
-# SADECE input dosyasını INPUT_EMAIL'e gönderir (isteğe bağlı)
-# ZIP yapmadan gönderim ÇOK DAHA KOLAY!
-async def send_input_only_email(input_path: Path) -> bool:
-    """SADECE input dosyasını INPUT_EMAIL'e direkt gönderir (ZIP'siz)"""
-    try:
-        # 🆕 SADECE INPUT_EMAIL kontrolü
-        if not config.email.INPUT_EMAIL:
-            logger.info("ℹ️ INPUT_EMAIL tanımlı değil, input mail gönderilmedi")
+        body += "İyi çalışmalar,\nData_listesi_Hıdır"
+
+        try:
+            success = await self.send_email_with_attachment([personal], subject, body, zip_path, max_retries=max_retries)
+            return success
+        finally:
+            try:
+                if zip_path.exists():
+                    zip_path.unlink()
+                    logger.debug(f"Temporary zip removed: {zip_path}")
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary zip: {e}")
+                
+
+    async def send_input_only_email(self, input_path: Path, max_retries: int = 2) -> bool:
+        input_email = getattr(config.email, 'INPUT_EMAIL', None)
+        if not input_email:
+            logger.info("INPUT_EMAIL not configured, skipping input send")
             return False
-            
-        if not input_path.exists():
-            logger.error(f"❌ Input dosyası bulunamadı: {input_path}")
+        if not input_path or not input_path.exists():
+            logger.error(f"Input file missing: {input_path}")
             return False
-            
-        logger.info(f"📤 Sadece input dosyası gönderiliyor: {config.email.INPUT_EMAIL}")
 
-        subject = f"📥 Telefon data Dosyası - {input_path.name}"
-        body = (
-            f"Merhaba,\n\n"
-            f"Telefon data dosyası ektedir.\n"
-            f"Dosya: {input_path.name}\n\n"
-            f"İyi çalışmalar,\nData_listesi_Hıdır"
-        )
+        subject = f"📥 TelPex Input excel - {input_path.name}"
+        body = (f"Merhaba,\n\nTelefon data dosyası ektedir.\nDosya: {input_path.name}\n\nİyi çalışmalar,\nData_listesi_Hıdır")
 
-        # 🆕 ZIP YOK - direkt dosyayı gönder
-        success = await send_email_with_attachment(
-            [config.email.INPUT_EMAIL],
-            subject, 
-            body, 
-            input_path  # 🆕 Direkt dosya yolu
-        )
-            
-        logger.info(f"✅ Input mail {'gönderildi' if success else 'gönderilemedi'}")
-        return success
-        
-    except Exception as e:
-        logger.error(f"❌ Input mail hatası: {e}")
-        return False
- 
- 
- 
+        return await self.send_email_with_attachment([input_email], subject, body, input_path, max_retries=max_retries)
+
+#    async def send_text_report_email(self, to_emails: List[str], subject: str, telegram_message: str, max_retries: int = 2) -> bool:
+#        return await self.send_simple_email(to_emails, subject, telegram_message, max_retries=max_retries)
+
+
+# Convenience: module-level default mailer
+_default_mailer: Optional[MailerV2] = None
+
+async def get_default_mailer() -> MailerV2:
+    global _default_mailer
+    if _default_mailer is None:
+        _default_mailer = MailerV2()
+        await _default_mailer.start()
+    return _default_mailer
+
+
+# End of Mailer V2 PRO

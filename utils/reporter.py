@@ -16,12 +16,15 @@ from datetime import datetime
 from utils.group_manager import group_manager
 from utils.logger import logger 
 
-async def generate_processing_report(result: Dict) -> str:
-    """✅ İşlem sonrası detaylı rapor oluşturur - HATA GÜVENLİ"""
+#✅ İşlem sonrası detaylı rapor oluşturur report_type: "mail" veya "telegram"
+
+async def generate_processing_report(result: Dict, report_type: str = "mail") -> str:
+    """✅ İşlem sonrası detaylı rapor oluşturur
+    report_type: "mail" veya "telegram"
+    """
     try:
         if not result.get("success", False):
             error_msg = result.get("error", "Bilinmeyen hata")
-            # Hata mesajını kısalt
             if len(error_msg) > 500:
                 error_msg = error_msg[:500] + "..."
             return f"❌ İşlem başarısız oldu:\n{error_msg}"
@@ -31,38 +34,69 @@ async def generate_processing_report(result: Dict) -> str:
         matched_rows = result.get("matched_rows", 0)
         unmatched_rows = total_rows - matched_rows
         email_results = result.get("email_results", [])
-        user_id = result.get("user_id", "Bilinmeyen")
         
-        successful_emails = sum(1 for res in email_results if res.get("success", False))
-        failed_emails = len(email_results) - successful_emails
+        # Grup mail istatistikleri
+        successful_group_emails = sum(1 for res in email_results if res.get("success", False))
+        failed_group_emails = len(email_results) - successful_group_emails
         
         # Toplu mail bilgisi
         bulk_email_sent = result.get("bulk_email_sent", False)
         bulk_email_recipient = result.get("bulk_email_recipient")
         
+        # 🆕 INPUT MAIL BİLGİSİ
+        input_email_sent = result.get("input_email_sent", False)
+        input_email_recipient = result.get("input_email_recipient")
+        
+        # ✅ RAPOR TÜRÜNE GÖRE HESAPLAMA
+        if report_type == "telegram":
+            # TELEGRAM: Tüm mailleri say (input + grup + toplu)
+            total_successful = successful_group_emails
+            total_failed = failed_group_emails
+            
+            if input_email_sent:
+                total_successful += 1
+            elif input_email_recipient:  # Input mail başarısızsa
+                total_failed += 1
+                
+            if bulk_email_sent:
+                total_successful += 1
+            elif bulk_email_recipient:  # Toplu mail başarısızsa
+                total_failed += 1
+        else:
+            # MAIL: Sadece grup mailleri
+            total_successful = successful_group_emails
+            total_failed = failed_group_emails
+        
         report_lines = [
-            "✅ **DOSYA İŞLEME RAPORU**",
+            "✅ **EXCEL DOSYA İŞLEME RAPORU**",
             f"⏰ İşlem zamanı: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
-            #f"👤 Kullanıcı ID: {user_id}",
             "",
-            "📊 **İSTATİSTİKLER:**",
+            "📊 *İstatistikler*",
             f"• Toplam satır: {total_rows}",
-            f"• Eşleşen satır: {matched_rows}",
-            f"• Eşleşmeyen satır: {unmatched_rows}",
+            # f"• Eşleşen satır: {matched_rows}",
+            # f"• Eşleşmeyen satır: {unmatched_rows}",
             f"• Oluşturulan dosya: {len(output_files)}",
-            f"• Başarılı mail: {successful_emails}",
-            f"• Başarısız mail: {failed_emails}",
+            f"• Başarılı mail: {total_successful}",
+            f"• Başarısız mail: {total_failed}",
         ]
         
-        # Toplu mail durumu
-        if bulk_email_sent and bulk_email_recipient:
-            report_lines.append(f"• 📧 Sonuç Rapor maili: {bulk_email_recipient} ✅")
-        else:
-            report_lines.append("• 📧 Otomatik Rapor mail: Gönderilemedi ❌")
+        # 🆕 INPUT MAIL DURUMU
+        if input_email_sent and input_email_recipient:
+            #report_lines.append(f"• 📥 Input Maili: {input_email_recipient} ✅")  # email görünmesi için kod yapısı {input_email_recipient} EKLENİR
+            report_lines.append(f"• 📥 Input Maili: ✅")
+        elif input_email_recipient:  # Input mail tanımlı ama gönderilememiş
+            report_lines.append(f"• 📥 Input Maili: ❌")
+        
+        # ✅ TELEGRAM İÇİN TOPLU MAIL DURUMU
+        if report_type == "telegram":
+            if bulk_email_sent and bulk_email_recipient:
+                report_lines.append(f"• 📧 Toplu Rapor Maili: {bulk_email_recipient} ✅")
+            elif bulk_email_recipient:  # Toplu mail tanımlı ama gönderilememiş
+                report_lines.append(f"• 📧 Toplu Rapor Maili: {bulk_email_recipient} ❌")
         
         report_lines.extend([
             "",
-            "📁 **OLUŞTURULAN DOSYALAR:**"
+            "📁 *Grup Dosyaları:*"
         ])
         
         # ✅ TAM ASYNC: Grup bilgilerini async olarak al
@@ -70,7 +104,6 @@ async def generate_processing_report(result: Dict) -> str:
             filename = file_info.get("filename", "bilinmeyen")
             row_count = file_info.get("row_count", 0)
             
-            # ✅ GROUP MANAGER UYUMLU: Doğru async metod
             group_info = await group_manager.get_group_info(group_id)
             group_name = group_info.get("group_name", group_id)
             
@@ -81,16 +114,16 @@ async def generate_processing_report(result: Dict) -> str:
         if unmatched_cities:
             report_lines.extend([
                 "",
-                "⚠️ **EŞLEŞMEYEN ŞEHİRLER:**",
+                "⚠️ **Excel Eşleşmeyen Iller:**",
                 f"Toplam {len(unmatched_cities)} farklı şehir:"
             ])
-            for city in unmatched_cities[:5]:
+            for city in unmatched_cities[:3]:
                 report_lines.append(f"• {city}")
-            if len(unmatched_cities) > 5:
-                report_lines.append(f"• ... ve {len(unmatched_cities) - 5} diğer şehir")
+            if len(unmatched_cities) > 3:
+                report_lines.append(f"• ... ve {len(unmatched_cities) - 3} diğer şehir")
         
         # Mail hataları
-        if failed_emails > 0:
+        if failed_group_emails > 0:
             report_lines.extend([
                 "",
                 "❌ **MAIL GÖNDERİM HATALARI:**"
@@ -100,15 +133,15 @@ async def generate_processing_report(result: Dict) -> str:
                 if not error.get("success", False) and error_count < 3:
                     report_lines.append(f"• {error.get('recipient', 'Bilinmeyen')}: {error.get('error', 'Bilinmeyen hata')}")
                     error_count += 1
-            if failed_emails > 3:
-                report_lines.append(f"• ... ve {failed_emails - 3} diğer hata")
+            if failed_group_emails > 3:
+                report_lines.append(f"• ... ve {failed_group_emails - 3} diğer hata")
         
         return "\n".join(report_lines)
         
     except Exception as e:
         logger.error(f"Rapor oluşturma hatası: {e}")
         return f"❌ Rapor oluşturma hatası: {str(e)}"
-
+        
 
 async def generate_email_report(email_results: List[Dict]) -> str:
     """✅ Email gönderim raporu oluşturur - TAM ASYNC"""
@@ -117,19 +150,33 @@ async def generate_email_report(email_results: List[Dict]) -> str:
         failed = len(email_results) - successful
         
         report = [
-            f"📧 **EMAIL RAPORU**",
+            f"📧 **EMAIL RAPORU_1**",
             f"⏰ İşlem zamanı: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
             f"✅ Başarılı: {successful}",
             f"❌ Başarısız: {failed}",
             ""
         ]
         
+        #kontrol sonrası siline bilir
+        #if failed > 0:
+        #    report.append("**Hatalar:**")
+        #    for i, result in enumerate(email_results[:5], 1):
+        #        if not result.get("success", False):
+        #            report.append(f"{i}. {result.get('recipient', 'Bilinmeyen')}: {result.get('error', 'Bilinmeyen hata')}")
+        #  Daha güvelisi      
         if failed > 0:
             report.append("**Hatalar:**")
-            for i, result in enumerate(email_results[:5], 1):
-                if not result.get("success", False):
-                    report.append(f"{i}. {result.get('recipient', 'Bilinmeyen')}: {result.get('error', 'Bilinmeyen hata')}")
-        
+            # Sadece başarısız sonuçları al ve ilk 7 tanesini listele
+            failed_results = [r for r in email_results if not r.get("success", False)][:7]
+            for i, fail in enumerate(failed_results, 1):
+                report.append(
+                    f"{i}. {fail.get('recipient', 'Bilinmeyen')}: "
+                    f"{fail.get('error', 'Bilinmeyen hata')}"
+                )
+
+
+
+                
         return "\n".join(report)
         
     except Exception as e:
