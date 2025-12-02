@@ -81,7 +81,7 @@ def should_include_file(file_path: Path) -> bool:
         return False
     
     # Önbellek ve geçici dizinleri atla (yolun herhangi bir yerinde)
-    excluded_dirs = ['__pycache__', 'node_modules', '.git', '.venv']
+    excluded_dirs = ['__pycache__', 'node_modules', '.git', '.venv','venv']
     if any(excluded_dir in path_str.split(os.sep) for excluded_dir in excluded_dirs):
         return False
     
