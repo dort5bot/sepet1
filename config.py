@@ -81,8 +81,13 @@ class BotConfig:
     
     # Constants
     MAX_EMAIL_RETRIES: int = 2
-    CHUNK_SIZE: int = 1000
+    CHUNK_SIZE: int = 5000
     LOG_RETENTION_DAYS: int = 30
+    # BÜYÜK DOSYA DESTEĞİ İÇİN
+    MAX_MEMORY_USAGE_MB: int = 500  # Yeni: Memory limit
+    MAX_FILE_SIZE_MB: int = 200  # Yeni: Max dosya boyutu
+    BATCH_PROCESSING_SIZE: int = 1000  # Yeni: Batch boyutu
+
 
 @dataclass
 class Config:
