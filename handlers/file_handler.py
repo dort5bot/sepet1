@@ -3,6 +3,8 @@
 /file o → Output dosyalarını zip olarak indir
 /file l → Log dosyalarını zip olarak indir
 /file c → Input/Output/Groups/temp dosyalarını temizler
+repley burdan temizlik komutunu çağırır
+
 /file c l → Sadece log dosyalarını temizler
 """
 import os
@@ -31,29 +33,6 @@ class FileManager:
         
         return zip_path
 
-    """@staticmethod
-    async def cleanup_directory(directory: Path, keep: list = None) -> tuple[int, int]:
-        keep = keep or []
-        cleared_files = 0
-        cleared_size = 0
-        
-        if directory.exists():
-            for file_path in directory.glob('*'):
-                if file_path.name in keep:
-                    continue
-
-                if file_path.is_file():
-                    try:
-                        file_size = file_path.stat().st_size
-                        file_path.unlink()
-                        cleared_files += 1
-                        cleared_size += file_size
-                    except Exception:
-                        continue
-        
-        return cleared_files, cleared_size
-    """
-    
     @staticmethod
     async def cleanup_directory(directory: Path, keep: list = None, recursive: bool = True) -> tuple[int, int]:
         keep = keep or []
@@ -88,8 +67,6 @@ class FileManager:
                 continue
         
         return cleared_files, cleared_size
-    
-    
     
     
     @staticmethod
@@ -159,7 +136,6 @@ async def download_output_files(message: types.Message):
             config.paths.OUTPUT_DIR,
             f"output_files_{user_id}.zip"
         )
-        
         await message.answer_document(
             types.FSInputFile(zip_path),
             caption="📁 Output dosyaları (zip)"
@@ -202,7 +178,8 @@ async def clear_all(message: types.Message):
         directories = [
             (config.paths.INPUT_DIR, "Input", []),
             (config.paths.OUTPUT_DIR, "Output", []),
-            (config.paths.LOGS_DIR, "Logs", []),
+            # Loglarda sadece bot.log ve errors.log korunacak
+            (config.paths.LOGS_DIR, "Logs", ["bot.log", "errors.log"]),
             (config.paths.GROUPS_DIR, "Groups", ["groups.json"])
         ]
         
@@ -238,36 +215,13 @@ async def clear_all(message: types.Message):
     except Exception as e:
         await message.answer(f"❌ Temizlik başarısız: {str(e)}")
 
-"""Sadece logları temizle
-async def clear_logs(message: types.Message):
-    try:
-        cleared_files, cleared_size = await FileManager.cleanup_directory(
-            config.paths.LOGS_DIR,
-            keep=[]
-        )
-        
-        if cleared_files > 0:
-            cleared_size_mb = cleared_size / (1024 * 1024)
-            result_text = (
-                f"📝 LOG TEMİZLİĞİ TAMAMLANDI!\n\n"
-                f"• Silinen log: {cleared_files}\n"
-                f"• Kazanılan alan: {cleared_size_mb:.2f} MB"
-            )
-        else:
-            result_text = "✅ Temizlenecek log yok."
-        
-        await message.answer(result_text)
-        
-    except Exception as e:
-        await message.answer(f"❌ Log temizleme başarısız: {str(e)}")
-"""
 
 async def clear_logs(message: types.Message):
     """Sadece logları temizle"""
     try:
         cleared_files, cleared_size = await FileManager.cleanup_directory(
             config.paths.LOGS_DIR,
-            keep=[],
+            keep=[],        # Tüm loglar silinecek (bot.log ve errors.log dahil)
             recursive=True  # Alt dizinleri de temizle
         )
         
