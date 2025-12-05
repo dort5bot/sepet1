@@ -50,7 +50,7 @@ def setup_logger():
     # Main log file - config'den path ve retention kullan
     logger.add(
         config.paths.LOGS_DIR / "bot.log",
-        rotation="10 MB",
+        rotation="5 MB",
         retention=f"{config.bot.LOG_RETENTION_DAYS} days",
         level="INFO",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
@@ -62,7 +62,7 @@ def setup_logger():
     # Error log file
     logger.add(
         config.paths.LOGS_DIR / "errors.log",
-        rotation="10 MB",
+        rotation="5 MB",
         retention=f"{config.bot.LOG_RETENTION_DAYS} days",
         level="ERROR",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
