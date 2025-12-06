@@ -216,8 +216,7 @@ async def clear_all(message: types.Message):
         await message.answer(f"❌ Temizlik başarısız: {str(e)}")
 
 
-async def clear_logs(message: types.Message):
-    """Sadece logları temizle"""
+"""async def clear_logs(message: types.Message):
     try:
         cleared_files, cleared_size = await FileManager.cleanup_directory(
             config.paths.LOGS_DIR,
@@ -246,3 +245,42 @@ async def clear_logs(message: types.Message):
         
     except Exception as e:
         await message.answer(f"❌ Log temizleme başarısız: {str(e)}")
+"""
+
+# Sadece log dosyalarının içini temizle (truncate)
+# dosya silinmesi tehlikelidir
+
+async def clear_logs(message: types.Message):
+    """Sadece log dosyalarının içini temizle (truncate)"""
+    try:
+        log_dir = config.paths.LOGS_DIR
+        
+        # Sadece .log dosyalarını bul
+        log_files = [f for f in log_dir.glob("*.log") if f.is_file()]
+        
+        if not log_files:
+            await message.answer("ℹ️ Temizlenecek log dosyası bulunamadı.")
+            return
+        
+        cleared = []
+        for file_path in log_files:
+            try:
+                # İçeriği sıfırla (truncate)
+                file_path.write_text("")
+                cleared.append(file_path.name)
+            except Exception as e:
+                print(f"Log temizlenemedi {file_path}: {e}")
+        
+        if cleared:
+            result_text = (
+                "📝 LOG DOSYALARI SIFIRLANDI!\n\n"
+                "Temizlenen loglar:\n" +
+                "\n".join(f"- {name}" for name in cleared)
+            )
+        else:
+            result_text = "ℹ️ Temizlenecek log dosyası yok."
+        
+        await message.answer(result_text)
+    
+    except Exception as e:
+        await message.answer(f"❌ Log temizleme hatası: {str(e)}")
