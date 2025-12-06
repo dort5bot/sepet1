@@ -179,7 +179,7 @@ class AsyncExcelCleaner:
     # ------ Sütun genişli -------------------------------
     # Sabit Genişlik (En hızlısı) - 100x (1-2 ms)
     def _sync_adjust_column_widths(self, ws: Worksheet):
-            fixed_width = 15  # istediğin sabit genişlik
+            fixed_width = 25  # istediğin sabit genişlik 25*0,56=14
             for col_idx in range(1, ws.max_column + 1):
                 col_letter = get_column_letter(col_idx)
                 ws.column_dimensions[col_letter].width = fixed_width

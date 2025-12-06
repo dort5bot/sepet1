@@ -1,5 +1,7 @@
 # utils/excel_splitter.py   geliştirilmiş RAM tüketmez
 # xlsxwriter DESTEKLİ
+# 'Veriler', 'Eşleşmeyenler' adlı sayfaya veriyi yazar,
+# sutun genişliğini burda ayarlar
 
 import asyncio
 from pathlib import Path
@@ -62,7 +64,10 @@ class ExcelSplitter:
 
         # Write headers
         ws.write_row(0, 0, self.headers)
-
+        
+        # sutun genişiliği ayarı 
+        ws.set_column(0, len(self.headers) - 1, 15)
+        
         self.writers[group_id] = wb
         self.sheets[group_id] = ws
         self.row_counts[group_id] = 1   # Next row index
@@ -189,6 +194,8 @@ class ExcelSplitter:
                 
                 # Başlıkları yaz
                 ws.write_row(0, 0, self.headers)
+                # sutun genişliği
+                ws.set_column(0, len(self.headers) - 1, 15)
                 
                 # Eşleşmeyen verileri yaz
                 row_index = 1
