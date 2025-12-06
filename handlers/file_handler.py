@@ -178,8 +178,8 @@ async def clear_all(message: types.Message):
         directories = [
             (config.paths.INPUT_DIR, "Input", []),
             (config.paths.OUTPUT_DIR, "Output", []),
-            # Loglarda sadece bot.log ve errors.log korunacak
-            (config.paths.LOGS_DIR, "Logs", ["bot.log", "errors.log"]),
+            # Logs klasörünüsü ASLA SİLME
+            #(config.paths.LOGS_DIR, "Logs", ["bot.log", "errors.log"]),
             (config.paths.GROUPS_DIR, "Groups", ["groups.json"])
         ]
         
@@ -215,37 +215,6 @@ async def clear_all(message: types.Message):
     except Exception as e:
         await message.answer(f"❌ Temizlik başarısız: {str(e)}")
 
-
-"""async def clear_logs(message: types.Message):
-    try:
-        cleared_files, cleared_size = await FileManager.cleanup_directory(
-            config.paths.LOGS_DIR,
-            keep=[],        # Tüm loglar silinecek (bot.log ve errors.log dahil)
-            recursive=True  # Alt dizinleri de temizle
-        )
-        
-        if cleared_files > 0:
-            cleared_size_mb = cleared_size / (1024 * 1024)
-            result_text = (
-                f"📝 LOG TEMİZLİĞİ TAMAMLANDI!\n\n"
-                f"• Silinen log: {cleared_files}\n"
-                f"• Kazanılan alan: {cleared_size_mb:.2f} MB"
-            )
-        else:
-            # Log dizinindeki dosyaları kontrol et
-            log_dir = config.paths.LOGS_DIR
-            all_files = list(log_dir.rglob('*.*'))
-            if all_files:
-                file_list = "\n".join([f"- {f.name}" for f in all_files if f.is_file()])
-                result_text = f"✅ Loglar temizlendi veya boş. Mevcut dosyalar:\n{file_list}"
-            else:
-                result_text = "✅ Log klasörü boş."
-        
-        await message.answer(result_text)
-        
-    except Exception as e:
-        await message.answer(f"❌ Log temizleme başarısız: {str(e)}")
-"""
 
 # Sadece log dosyalarının içini temizle (truncate)
 # dosya silinmesi tehlikelidir
