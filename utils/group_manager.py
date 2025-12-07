@@ -34,6 +34,13 @@ class GroupManager:
         self.group_cache: Dict[str, Dict[str, Any]] = {}
         self._initialized = False
         self._init_lock = asyncio.Lock()
+        self._normalize_cache = {}
+        self._trans = str.maketrans(
+            'ğĞıİöÖüÜşŞçÇ',
+            'gGiIoOuUsScC'
+        )
+
+
     
     async def _ensure_initialized(self):
         """Async başlatma garantisi"""
@@ -44,26 +51,37 @@ class GroupManager:
             if not self._initialized:
                 await self.initialize()
     
+
     def normalize_city_name(self, city_name: str) -> str:
-        """Şehir normalizasyonu"""
         if not city_name or not isinstance(city_name, str):
             return ""
-        
-        # Unicode normalizasyonu
-        city_name = unicodedata.normalize('NFKD', city_name)
-        
-        # Türkçe karakter dönüşümü
-        turkish_to_english = str.maketrans(
-            'ğĞıİöÖüÜşŞçÇ',
-            'gGiIoOuUsScC'
-        )
-        normalized = city_name.translate(turkish_to_english)
-        
-        # Temizleme ve formatlama
-        normalized = re.sub(r'[^A-Z0-9\s]', '', normalized.upper().strip())
-        normalized = re.sub(r'\s+', ' ', normalized)
-        
-        return normalized
+
+        # CACHE KEY
+        key = city_name.strip()
+        if key in self._normalize_cache:
+            return self._normalize_cache[key]
+
+        # 1) Unicode normalizasyonu
+        raw = unicodedata.normalize('NFKD', key)
+
+        # 2) Türkçe karakterleri İngilizce karşılıklarına çevir
+        cleaned = raw.translate(self._trans)
+
+        # 3) Uppercase + trim
+        cleaned = cleaned.upper().strip()
+
+        # 4) Türkçe olmayan karakterleri sil
+        cleaned = re.sub(r'[^A-Z0-9\s]', '', cleaned)
+
+        # 5) Çoklu boşlukları tek boşluğa indir
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+
+        # CACHE’e yaz
+        self._normalize_cache[key] = cleaned
+        return cleaned
+
+
+
     
     async def _build_city_mapping(self) -> Dict[str, List[str]]:
         """Şehir-grup mapping"""
