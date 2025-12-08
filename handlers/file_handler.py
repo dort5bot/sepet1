@@ -6,6 +6,16 @@
 repley burdan temizlik komutunu çağırır
 
 /file c l → Sadece log dosyalarını temizler
+
+| Klasör | Kodun Davranışı                   | Senin İstediğin | UYUMLU MU? |
+| ------ | --------------------------------- | --------------- | ---------- |
+| INPUT  | Her şeyi siler                    | Evet            | ✔          |
+| OUTPUT | Her şeyi siler                    | Evet            | ✔          |
+| GROUPS | `groups.json` dışındakileri siler | Evet            | ✔          |
+| TEMP   | geçici dosyaları siler            | evet            | ✔          |
+| LOGS   | dokunmaz                          | dokunmamalı     | ✔          |
+
+
 """
 import os
 import shutil
@@ -67,7 +77,9 @@ class FileManager:
                 continue
         
         return cleared_files, cleared_size
+
     
+
     
     @staticmethod
     async def cleanup_temp_files() -> tuple[int, int]:
@@ -178,8 +190,7 @@ async def clear_all(message: types.Message):
         directories = [
             (config.paths.INPUT_DIR, "Input", []),
             (config.paths.OUTPUT_DIR, "Output", []),
-            # Logs klasörünüsü ASLA SİLME
-            #(config.paths.LOGS_DIR, "Logs", ["bot.log", "errors.log"]),
+            # ASLA SİLME config.paths.LOGS_DIR, "Logs", ["bot.log", "errors.log"]),
             (config.paths.GROUPS_DIR, "Groups", ["groups.json"])
         ]
         
