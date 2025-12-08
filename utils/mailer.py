@@ -27,7 +27,7 @@ Notes:
 - This implementation uses a single persistent connection and a semaphore to limit parallel
   send attempts. If you want connection pooling, it can be extended.
 """
-
+# utils/mailer.py
 import asyncio
 import logging
 import ssl
@@ -45,7 +45,18 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
+# mailler kitleme
+_default_mailer: Optional["MailerV2"] = None
+_default_mailer_lock = asyncio.Lock()
 
+async def get_default_mailer() -> "MailerV2":
+    global _default_mailer
+    async with _default_mailer_lock:
+        if _default_mailer is None:
+            _default_mailer = MailerV2()
+            await _default_mailer.start()
+        return _default_mailer
+        
 class SMTPConnectionManager:
     """Manages a single persistent SMTP connection with reconnection logic."""
 
@@ -192,6 +203,71 @@ class MailerV2:
     async def stop(self) -> None:
         await self._conn_mgr.disconnect()
         self._started = False
+
+    async def send_batch(self, jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        jobs: List of job dicts as created in process_excel_task.
+        Returns: list of results per job {job_index, success, error(optional)}
+        Behavior:
+          - Ensure connection started once
+          - Send 'input' jobs first (serial)
+          - Then send 'group' jobs with limited parallelism (semaphore already applied in _send_with_controls)
+          - Finally send 'bulk' jobs (ZIP creation & send)
+        """
+        results = []
+        # ensure single connect
+        if not self._started:
+            connected = await self.start()
+            if not connected:
+                # fail all jobs
+                for i, job in enumerate(jobs):
+                    results.append({"job_index": i, "success": False, "error": "Mailer cannot connect"})
+                return results
+
+        # 1) input jobs (serial)
+        for i, job in enumerate(jobs):
+            if job.get("type") == "input":
+                try:
+                    ok = await self.send_email_with_attachment(job["to"], job["subject"], job["body"], job["attachments"][0])
+                    results.append({"job_index": i, "success": ok})
+                except Exception as e:
+                    results.append({"job_index": i, "success": False, "error": str(e)})
+
+        # 2) group jobs (parallel, but _send_with_controls has semaphore)
+        group_tasks = []
+        group_indices = []
+        for i, job in enumerate(jobs):
+            if job.get("type") == "group":
+                # create task but don't await yet
+                coro = self.send_email_with_attachment(job["to"], job["subject"], job["body"], job["attachments"][0])
+                task = asyncio.create_task(_wrap_job(coro, i))
+                group_tasks.append(task)
+                group_indices.append(i)
+
+        if group_tasks:
+            group_results = await asyncio.gather(*group_tasks, return_exceptions=True)
+            # group_results already wrapped; append to results in original order
+            for res in group_results:
+                results.append(res)
+
+        # 3) bulk jobs (serial; usually only 1)
+        for i, job in enumerate(jobs):
+            if job.get("type") == "bulk":
+                try:
+                    # create zip using existing helper
+                    input_path = job["meta"].get("input_path")
+                    output_files = job["meta"].get("output_files")
+                    zip_path = await self._create_bulk_zip(input_path, output_files)
+                    if not zip_path:
+                        results.append({"job_index": i, "success": False, "error": "ZIP creation failed"})
+                        continue
+                    ok = await self.send_email_with_attachment(job["to"], job["subject"], job["body"], zip_path)
+                    results.append({"job_index": i, "success": ok})
+                except Exception as e:
+                    results.append({"job_index": i, "success": False, "error": str(e)})
+
+        return results
+
 
     # low-level send wrapper with semaphore and retry/backoff
     async def _send_with_controls(self, message: EmailMessage, recipients: List[str], max_retries: int = 2) -> bool:
@@ -364,19 +440,14 @@ class MailerV2:
 
         return await self.send_email_with_attachment([input_email], subject, body, input_path, max_retries=max_retries)
 
-#    async def send_text_report_email(self, to_emails: List[str], subject: str, telegram_message: str, max_retries: int = 2) -> bool:
-#        return await self.send_simple_email(to_emails, subject, telegram_message, max_retries=max_retries)
 
 
-# Convenience: module-level default mailer
-_default_mailer: Optional[MailerV2] = None
-
-async def get_default_mailer() -> MailerV2:
-    global _default_mailer
-    if _default_mailer is None:
-        _default_mailer = MailerV2()
-        await _default_mailer.start()
-    return _default_mailer
-
-
+# helper outside class
+async def _wrap_job(coro, job_index):
+    try:
+        ok = await coro
+        return {"job_index": job_index, "success": bool(ok)}
+    except Exception as e:
+        return {"job_index": job_index, "success": False, "error": str(e)}
+        
 # End of Mailer V2 PRO

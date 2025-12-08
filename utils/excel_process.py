@@ -36,6 +36,7 @@ from utils.excel_splitter import split_excel_by_groups
 from utils.reporter import generate_processing_report
 
 from utils.mailer import MailerV2
+from utils.mailer import get_default_mailer   # mevcut fonksiyondan kullanıyoruz
 from utils.group_manager import group_manager
 from utils.logger import logger
 
@@ -59,96 +60,155 @@ async def close_mailer():
         _mailer_instance = None
 
 
-# mail sıralama
+
+# YENİ SÜRÜM – işlem sırası TÜM MAİLLER EN SON GÖNDERİLİR
+# [1] Excel temizleme (seri)
+# [2] Excel split (seri)
+# [3] Grup mailleri (PARALEL)
+# [4] Input mail (SERİ — grup mailleri bittikten sonra)
+# [5] Rapor oluşturma (SERİ)
+# [6] Rapor maili → (İstersen seri, istersen telegram paralel)
+# Hiçbir mail Excel işlemleri devam ederken gönderilmez.
+# SMTP bağlantısı sadece 1 kere kullanılır (deadlock yok)
+# EXCEL İŞLE | → | TÜM MAİLLERİ SIRAYLA GÖNDER | → | TELEGRAM RAPORU
+
 async def process_excel_task(input_path: Path, user_id: int) -> Dict[str, Any]:
-    """Excel işleme görevini TAM ASYNC olarak yürütür"""
+    """Excel işleme görevini TAM ASYNC + TAM MAIL SIRASI ile yürütür"""
+
     cleaning_result = None
     temp_files_to_cleanup = []
-    
+
     try:
         logger.info(f"📊 Excel işleme başlatıldı: {input_path.name}, Kullanıcı: {user_id}")
 
-        # 🆕 ÖNCE INPUT MAIL GÖNDER (ZIP'siz, direkt)
-        input_email_success = await send_input_only_email(input_path)
-        input_email_recipient = config.email.INPUT_EMAIL if input_email_success else None
-
-        # 1. Excel temizleme (TAM ASYNC)
+        # ---------------------------------------------------------------------
+        # 1) EXCEL TEMİZLEME - seri
+        # ---------------------------------------------------------------------
         logger.info("TEMIZLEME BASLIYOR...11")
         cleaning_result = await _clean_excel_headers_async(str(input_path))
         logger.info("TEMIZLEME BITTI-12")
+
         if not cleaning_result["success"]:
-            error_msg = f"Excel temizleme hatası: {cleaning_result.get('error', 'Bilinmeyen hata')}"
+            error_msg = f"Excel temizleme hatası: {cleaning_result.get('error')}"
             logger.error(error_msg)
             return {"success": False, "error": error_msg}
-        
+
         temp_files_to_cleanup.append(cleaning_result["temp_path"])
         logger.info(f"✅ Excel temizlendi: {cleaning_result['row_count']} satır")
 
-        # 2. Dosya ayırma (TAM ASYNC)
+
+        # ---------------------------------------------------------------------
+        # 2) EXCEL GRUPLAMA - seri
+        # ---------------------------------------------------------------------
         logger.info("AYIRMA BASLIYOR...21")
         splitting_result = await split_excel_by_groups(
             cleaning_result["temp_path"],
             cleaning_result["headers"]
         )
         logger.info("AYIRMA BITTI-22")
-        
+
         if not splitting_result["success"]:
-            error_msg = f"Excel ayırma hatası: {splitting_result.get('error', 'Bilinmeyen hata')}"
+            error_msg = f"Excel ayırma hatası: {splitting_result.get('error')}"
             logger.error(error_msg)
             return {"success": False, "error": error_msg}
-        
-        logger.info(f"✅ Excel gruplara ayrıldı: {splitting_result['total_rows']} satır, {len(splitting_result['output_files'])} grup")
 
-        # 3. 🆕 ÖNCE GRUP MAILLERİNİ GÖNDER
-        logger.info("GRUP MAILLERI BASLIYOR...-31")
-        email_results = await _send_group_emails(splitting_result["output_files"])
-        logger.info("GRUP MAILLERI BITTI -32")
-        
-        # 4. 🆕 SONRA PERSONAL_EMAIL GÖNDER (grup sonuçlarını içerecek)
-        toplu_mail_success = await _send_bulk_email(input_path, splitting_result["output_files"], {
-            "success": True,
-            "output_files": splitting_result["output_files"],
-            "total_rows": splitting_result["total_rows"],
-            "matched_rows": splitting_result["matched_rows"],
-            "unmatched_cities": splitting_result.get("unmatched_cities", []),
-            "email_results": email_results,  # 🆕 Grup mail sonuçlarını ekle
-            "input_email_sent": input_email_success,  # 🆕 Input mail durumu
-            "input_email_recipient": input_email_recipient  # 🆕 Input mail alıcısı
-        })
+        output_files = splitting_result["output_files"]
+        logger.info(f"✅ Excel gruplara ayrıldı: {splitting_result['total_rows']} satır, {len(output_files)} grup")
 
-        # ✅ DEĞİŞİKLİK: Telegram için nihai sonuç
-        final_result = {
-            "success": True,
-            "output_files": splitting_result["output_files"],
-            "total_rows": splitting_result["total_rows"],
-            "matched_rows": splitting_result["matched_rows"],
-            "email_results": email_results,
-            "bulk_email_sent": toplu_mail_success,
-            "bulk_email_recipient": config.email.PERSONAL_EMAIL if toplu_mail_success else None,
-            "input_email_sent": input_email_success,  # 🆕 Input mail durumu
-            "input_email_recipient": input_email_recipient,  # 🆕 Input mail alıcısı
-            "user_id": user_id,
-            "unmatched_cities": splitting_result.get("unmatched_cities", []),
-            "stats": splitting_result.get("stats", {})
+
+        # ---------------------------------------------------------------------
+        # 3) TÜM MAİLLER BU AŞAMADAN SONRA SIRAYLA GİDECEK
+        # ---------------------------------------------------------------------
+
+        mail_results = {
+            "group_mails": {}
+            # "input_mail": None,
+            # "personal_mail": None
         }
 
-        # ✅ TELEGRAM RAPORU OLUŞTUR (tüm mailler)
+        # ************************************************************
+        # 3.1 GRUP MAİLLERİ (N adet) - paralel
+        # ************************************************************
+        logger.info("📧 GRUP MAİLLERİ GÖNDERİLİYOR... (1/3)")
+        group_results = await _send_group_emails(output_files)
+        mail_results["group_mails"] = group_results
+
+
+        # ************************************************************
+        # 3.2 INPUT MAIL - seri
+        # ************************************************************
+        logger.info("📧 INPUT MAIL GÖNDERİLİYOR... (2/3)")
+        mail_results["input_mail"] = await send_input_only_email(input_path)
+        #MAİLİ GÖRMEK İSTERSEN 
+        mail_results["input_email_recipient"] = getattr(config.email, "INPUT_EMAIL", None)
+
+
+
+        # ************************************************************
+        # 3.3 KİŞİSEL MAIL (ZIP + RAPOR) – EN SON - seri
+        # ************************************************************
+        logger.info("📧 KİŞİSEL SON RAPOR MAILİ GÖNDERİLİYOR... (3/3)")
+        mail_results["personal_mail"] = await _send_bulk_email(
+            input_path,
+            output_files,
+            {
+                "success": True,
+                "output_files": output_files,
+                "total_rows": splitting_result["total_rows"],
+                "matched_rows": splitting_result["matched_rows"],
+                "unmatched_cities": splitting_result.get("unmatched_cities", []),
+                #"group_emails": group_results,
+                "email_results": group_results,
+                "input_email_sent": mail_results["input_mail"],
+            }
+        )
+        #mail adresini görmek İstersen 
+        mail_results["bulk_email_recipient"] = getattr(config.email, "PERSONAL_EMAIL", None)
+
+
+
+        # ---------------------------------------------------------------------
+        # 4) TELEGRAM RAPORU
+        # ---------------------------------------------------------------------
+        final_result = {
+            "success": True,
+            "output_files": output_files,
+            "total_rows": splitting_result["total_rows"],
+            "matched_rows": splitting_result["matched_rows"],
+            "unmatched_cities": splitting_result.get("unmatched_cities", []),
+            "stats": splitting_result.get("stats", {}),
+            "mail_results": mail_results,
+            "user_id": user_id,
+            
+            "input_email_recipient": mail_results["input_email_recipient"],
+            "bulk_email_recipient": mail_results["bulk_email_recipient"],
+           
+            "email_results": group_results,  # _send_group_emails'dan gelen sonuçları direkt kullanın
+            "input_email_sent": mail_results.get("input_mail", False),  # .get ile güvenli erişim
+            "bulk_email_sent": mail_results.get("personal_mail", False),  # .get ile güvenli erişim
+
+    
+            # # ✅ YENİ EKLENEN ALANLAR:
+            # "email_results": mail_results["group_mails"],  # Grup mail sonuçları
+            # "input_email_sent": mail_results["input_mail"],  # Input mail durumu
+            # "bulk_email_sent": mail_results["personal_mail"],  # Toplu mail durumu
+
+        }
+
         telegram_report = await generate_processing_report(final_result, "telegram")
         logger.info(f"📱 Telegram raporu hazır: {len(telegram_report)} karakter")
-        
+
         return final_result
-        
+
     except Exception as e:
         logger.error(f"❌ İşlem görevi hatası: {e}", exc_info=True)
-        error_msg = str(e)
-        if len(error_msg) > 300:
-            error_msg = error_msg[:300] + "..."
-        return {"success": False, "error": error_msg}
-        
+        return {"success": False, "error": str(e)}
+
     finally:
         await _cleanup_temp_files(temp_files_to_cleanup)
-        
-        
+
+
+       
 async def _clean_excel_headers_async(input_path: str) -> Dict[str, Any]:
     """Excel temizleme işlemini TAM ASYNC olarak yürütür"""
     try:
