@@ -5,6 +5,8 @@ Dosya adı bazlı dağıtım işlemleri (ZIP'siz doğrudan gönderim)
 
 version: 27-11-2025
 """
+import asyncio
+
 from pathlib import Path
 from typing import Dict, List
 from aiogram import Router, F
