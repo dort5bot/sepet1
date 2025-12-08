@@ -17,8 +17,9 @@ from aiohttp import web
 from config import config
 
 from utils.handler_loader import HandlerLoader
-from utils.logger import setup_logger, logger
+from utils.mailer import get_default_mailer # Mailer.stop için
 
+from utils.logger import setup_logger, logger
 # Logger kurulumu
 setup_logger()
 
@@ -47,6 +48,8 @@ class BotServer:
         logger.info("🔄 Handler'lar yükleniyor...")
         loader = HandlerLoader(self.dp)
         load_result = await loader.load_handlers(self.dp)
+
+        
         logger.info(f"✅ Handler yükleme tamamlandı: {load_result}")
 
     def setup_signal_handlers(self):
@@ -119,19 +122,38 @@ class BotServer:
         """Health check handler"""
         return web.Response(text="Bot is running")
 
+
     async def shutdown(self) -> None:
         """Graceful shutdown"""
         logger.info("🔴 Bot durduruluyor...")
-        
+
+        # 1) SMTP bağlantısını temizle (kritik)
+        try:
+            from utils.mailer import get_default_mailer
+            mailer = await get_default_mailer()
+            await mailer.stop()
+            logger.info("📨 Mailer SMTP bağlantısı kapatıldı")
+        except Exception as e:
+            logger.error(f"Mailer kapatılırken hata: {e}")
+
+        # 2) Webhook kapat
         if self.webhook_runner:
             await self.webhook_runner.cleanup()
             logger.info("✅ Webhook runner temizlendi")
-        
+
+        # 3) Bot session kapat
         if self.bot:
             await self.bot.session.close()
             logger.info("✅ Bot session kapatıldı")
-        
+
         logger.info("✅ Bot başarıyla durduruldu")
+
+
+
+
+
+
+
 
 async def main():
     """Optimized main function"""
