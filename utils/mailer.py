@@ -222,89 +222,231 @@ class MailerV2:
         await self._conn_mgr.disconnect()
         self._started = False
 
+    # mailgönderim sıralaması
+    # 1) group mails first (parallel)
+    # 2) input mails (serial) AFTER group
+    # - Grup mail sonuçları temiz kapandıktan sonra başlar
+    # 3) bulk/rapor (serial)
+
     # grup maİllerİ gönderimi: 1/2 - sadece görev yaratır
-    async def send_batch(self, jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        jobs: List of job dicts as created in process_excel_task.
-        Returns: list of results per job {job_index, success, error(optional)}
-        Behavior:
-          - Ensure connection started once
-          - Send 'input' jobs first (serial)
-          - Then send 'group' jobs with limited parallelism (semaphore already applied in _send_with_controls)
-          - Finally send 'bulk' jobs (ZIP creation & send)
-        """
+    # Gönderim sırasını belirlenir:
+
+    # -1-
+    """async def send_batch(self, jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        #Correct mail order:
+        #    1) group mails (parallel)
+        #    2) input mail (serial, AFTER groups)
+        #    3) bulk mail / rapor (serial)
+
         results = []
+
         # ensure single connect
         if not self._started:
             connected = await self.start()
             if not connected:
-                # fail all jobs
                 for i, job in enumerate(jobs):
                     results.append({"job_index": i, "success": False, "error": "Mailer cannot connect"})
                 return results
 
-        # 1) input jobs (serial)
-        for i, job in enumerate(jobs):
-            if job.get("type") == "input":
-                try:
-                    ok = await self.send_email_with_attachment(job["to"], job["subject"], job["body"], job["attachments"][0])
-                    results.append({"job_index": i, "success": ok})
-                except Exception as e:
-                    results.append({"job_index": i, "success": False, "error": str(e)})
-
-
-        # 2) group jobs (parallel, but _send_with_controls has semaphore)
+        # -------------------------------------------------------------
+        # 1) GROUP MAILS (PARALLEL)
+        # -------------------------------------------------------------
         group_tasks = []
         group_indices = []
+
         for i, job in enumerate(jobs):
             if job.get("type") == "group":
-                coro = self.send_email_with_attachment(job["to"], job["subject"], job["body"], job["attachments"][0])
+                coro = self.send_email_with_attachment(
+                    job["to"], job["subject"], job["body"], job["attachments"][0]
+                )
                 task = asyncio.create_task(_wrap_job(coro, i))
                 group_tasks.append(task)
                 group_indices.append(i)
 
         if group_tasks:
-            # GLOBAL TIMEOUT EKLENDİ
             try:
                 group_results = await asyncio.wait_for(
                     asyncio.gather(*group_tasks, return_exceptions=True),
                     timeout=360  # 6 dakika
                 )
             except asyncio.TimeoutError:
-                logger.error("GLOBAL TIMEOUT: group mail tasks exceeded 300 seconds")
-                # tüm grup job’ları fail yap
+                logger.error("GLOBAL TIMEOUT: group mail tasks exceeded 360 seconds")
                 for idx in group_indices:
                     results.append({
                         "job_index": idx,
                         "success": False,
-                        "error": "Global timeout (5 min) while sending group mails"
+                        "error": "Global timeout (6 min) while sending group mails"
                     })
                 group_results = []
-                # bulk işlemler yine çalışır
 
-            # group_results varsa (timeout olmadıysa) ekle
             for res in group_results:
                 results.append(res)
-       
-        
-        
-        # 3) bulk jobs (serial; usually only 1)
+
+        # -------------------------------------------------------------
+        # 2) INPUT MAIL (SERIAL — GROUP BİTTİKTEN SONRA)
+        # -------------------------------------------------------------
         for i, job in enumerate(jobs):
-            if job.get("type") == "bulk":
+            if job.get("type") == "input":
                 try:
-                    # create zip using existing helper
-                    input_path = job["meta"].get("input_path")
-                    output_files = job["meta"].get("output_files")
-                    zip_path = await self._create_bulk_zip(input_path, output_files)
-                    if not zip_path:
-                        results.append({"job_index": i, "success": False, "error": "ZIP creation failed"})
-                        continue
-                    ok = await self.send_email_with_attachment(job["to"], job["subject"], job["body"], zip_path)
+                    ok = await self.send_email_with_attachment(
+                        job["to"], job["subject"], job["body"], job["attachments"][0]
+                    )
                     results.append({"job_index": i, "success": ok})
                 except Exception as e:
                     results.append({"job_index": i, "success": False, "error": str(e)})
 
+        # -------------------------------------------------------------
+        # 3) BULK / RAPOR (SERIAL)
+        # -------------------------------------------------------------
+        for i, job in enumerate(jobs):
+            if job.get("type") == "bulk":
+                try:
+                    input_path = job["meta"].get("input_path")
+                    output_files = job["meta"].get("output_files")
+
+                    zip_path = await self._create_bulk_zip(input_path, output_files)
+                    if not zip_path:
+                        results.append({"job_index": i, "success": False, "error": "ZIP creation failed"})
+                        continue
+
+                    ok = await self.send_email_with_attachment(
+                        job["to"], job["subject"], job["body"], zip_path
+                    )
+                    results.append({"job_index": i, "success": ok})
+
+                except Exception as e:
+                    results.append({"job_index": i, "success": False, "error": str(e)})
+
         return results
+    """
+
+    # -2-
+    # -2- results listesinin jobs index sırasına göre tutulması, sıra takibi
+    async def send_batch(self, jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        #Correct mail order:
+        #    1) group mails (parallel)
+        #    2) input mail (serial, AFTER groups)
+        #    3) bulk mail / rapor (serial)
+        #results listesi artık JOB SIRASI ile birebir aynı index'te tutulur.
+
+        # results dizisinin uzunluğu kadar sabit liste oluştur
+        results = [None] * len(jobs)
+
+        # ensure single connect
+        if not self._started:
+            connected = await self.start()
+            if not connected:
+                # tüm job’ları mailer bağlantı hatası olarak işaretle
+                for i in range(len(jobs)):
+                    results[i] = {
+                        "job_index": i,
+                        "success": False,
+                        "error": "Mailer cannot connect"
+                    }
+                return results
+
+        # -------------------------------------------------------------
+        # 1) GROUP MAILS (PARALLEL)
+        # -------------------------------------------------------------
+        group_tasks = {}   # task → job_index
+
+        for i, job in enumerate(jobs):
+            if job.get("type") == "group":
+                coro = self.send_email_with_attachment(
+                    job["to"], job["subject"], job["body"], job["attachments"][0]
+                )
+                task = asyncio.create_task(coro)
+                group_tasks[task] = i
+
+        if group_tasks:
+            try:
+                done = await asyncio.wait_for(
+                    asyncio.gather(*group_tasks.keys(), return_exceptions=True),
+                    timeout=360  # 6 dakika
+                )
+
+                # sonuçları kendi indexlerine yaz
+                for task, outcome in zip(group_tasks.keys(), done):
+                    job_index = group_tasks[task]
+
+                    if isinstance(outcome, Exception):
+                        results[job_index] = {
+                            "job_index": job_index,
+                            "success": False,
+                            "error": str(outcome)
+                        }
+                    else:
+                        results[job_index] = {
+                            "job_index": job_index,
+                            "success": bool(outcome)
+                        }
+
+            except asyncio.TimeoutError:
+                logger.error("GLOBAL TIMEOUT: group mail tasks exceeded 360 seconds")
+
+                for task, job_index in group_tasks.items():
+                    results[job_index] = {
+                        "job_index": job_index,
+                        "success": False,
+                        "error": "Global timeout (6 min) while sending group mails"
+                    }
+
+        # -------------------------------------------------------------
+        # 2) INPUT MAIL (SERIAL)
+        # -------------------------------------------------------------
+        for i, job in enumerate(jobs):
+            if job.get("type") == "input":
+                try:
+                    ok = await self.send_email_with_attachment(
+                        job["to"], job["subject"], job["body"], job["attachments"][0]
+                    )
+                    results[i] = {
+                        "job_index": i,
+                        "success": ok
+                    }
+                except Exception as e:
+                    results[i] = {
+                        "job_index": i,
+                        "success": False,
+                        "error": str(e)
+                    }
+
+        # -------------------------------------------------------------
+        # 3) BULK / RAPOR MAIL (SERIAL)
+        # -------------------------------------------------------------
+        for i, job in enumerate(jobs):
+            if job.get("type") == "bulk":
+                try:
+                    input_path = job["meta"].get("input_path")
+                    output_files = job["meta"].get("output_files")
+
+                    zip_path = await self._create_bulk_zip(input_path, output_files)
+                    if not zip_path:
+                        results[i] = {
+                            "job_index": i,
+                            "success": False,
+                            "error": "ZIP creation failed"
+                        }
+                        continue
+
+                    ok = await self.send_email_with_attachment(
+                        job["to"], job["subject"], job["body"], zip_path
+                    )
+                    results[i] = {
+                        "job_index": i,
+                        "success": ok
+                    }
+
+                except Exception as e:
+                    results[i] = {
+                        "job_index": i,
+                        "success": False,
+                        "error": str(e)
+                    }
+
+        return results
+
+
 
     # ------------------------------------------------------------
     # low-level send wrapper with semaphore and retry/backoff
