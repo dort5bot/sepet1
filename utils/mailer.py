@@ -9,16 +9,17 @@ PRO - Stabilite Sürümü
 - Safe attachment handling (reads attachments per-email, no global preloading)
 - ZIP helper for input+output bundles
 
-Usage:
-
-from utils.mailer_v2_pro import MailerV2
-
-mailer = MailerV2()
-await mailer.start()            # starts/creates persistent connection(s)
-await mailer.send_simple_email([...], subject, body)
-await mailer.send_email_with_attachment([...], subject, body, Path(...))
-await mailer.send_automatic_bulk_email(input_path, output_files)
-await mailer.stop()             # clean shutdown
+Serial-input mail → parallel-group mail → serial-bulk mail yönetimi
+MTP Hatası Olursa Kesin Olarak Ne Olur?
+Zaman aşımı 20 saniyede devreye girer
+Mevcut bağlantı kapanır
+Tüm SMTP portlarına yeniden bağlanmayı dener
+Send yeniden denenir
+Exponential backoff ile maksimum 3 send denemesi yapılır
+Hâlâ başarısızsa:
+_send_with_controls() False döner
+send_batch() iş kaydını success=False + error ile işaretler
+Sistem kilitlenmez, takılmaz, sonsuz beklemez
 
 Notes:
 - Configure config.email.SMTP_SERVER, SMTP_PORTS (list), SMTP_USERNAME, SMTP_PASSWORD,
@@ -105,10 +106,14 @@ class SMTPConnectionManager:
                             use_tls=use_tls,
                             tls_context=ssl_context,
                         )
-                        await client.connect()
+                        #await client.connect()
+                        await asyncio.wait_for(client.connect(), timeout=20)
+
 
                         # If STARTTLS, library usually handles the start; ensure login
-                        await client.login(username, password)
+                        #await client.login(username, password)
+                        await asyncio.wait_for(client.login(username, password), timeout=20)
+
 
                         # assign persistent client
                         self._client = client
@@ -143,6 +148,7 @@ class SMTPConnectionManager:
                     self._connected_port = None
                     logger.info("SMTP client disconnected")
 
+    # timeout eklendi: sistem tamamen kilitlenmez
     async def send_message(self, message: EmailMessage) -> None:
         """Sends message using persistent client. Will try to reconnect if needed."""
         # We'll attempt a few reconnects if send fails
@@ -158,7 +164,14 @@ class SMTPConnectionManager:
                     raise RuntimeError("Unable to connect to SMTP server")
 
             try:
-                await self._client.send_message(message)
+                # timeout eklenerek takılma çözülür, oto kapanır
+                # await self._client.send_message(message)
+                # SMTP sunucu yanıt vermezse timeout→ 20 sn sonra otomatik TimeoutError
+                await asyncio.wait_for(
+                    self._client.send_message(message),
+                    timeout=20
+                )
+                            
             except Exception as send_exc:
                 logger.warning(f"Send failed on existing connection: {send_exc}; attempting reconnect and retry")
                 # try reconnect and resend
@@ -173,7 +186,12 @@ class SMTPConnectionManager:
 
                 # try one more time
                 try:
-                    await self._client.send_message(message)
+                    #await self._client.send_message(message)
+                    await asyncio.wait_for(
+                        self._client.send_message(message),
+                        timeout=20
+                    )
+                            
                 except Exception as e:
                     logger.error(f"Retry send after reconnect failed: {e}")
                     raise
@@ -204,6 +222,7 @@ class MailerV2:
         await self._conn_mgr.disconnect()
         self._started = False
 
+    # grup maİllerİ gönderimi: 1/2 - sadece görev yaratır
     async def send_batch(self, jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         jobs: List of job dicts as created in process_excel_task.
@@ -233,23 +252,42 @@ class MailerV2:
                 except Exception as e:
                     results.append({"job_index": i, "success": False, "error": str(e)})
 
+
         # 2) group jobs (parallel, but _send_with_controls has semaphore)
         group_tasks = []
         group_indices = []
         for i, job in enumerate(jobs):
             if job.get("type") == "group":
-                # create task but don't await yet
                 coro = self.send_email_with_attachment(job["to"], job["subject"], job["body"], job["attachments"][0])
                 task = asyncio.create_task(_wrap_job(coro, i))
                 group_tasks.append(task)
                 group_indices.append(i)
 
         if group_tasks:
-            group_results = await asyncio.gather(*group_tasks, return_exceptions=True)
-            # group_results already wrapped; append to results in original order
+            # GLOBAL TIMEOUT EKLENDİ
+            try:
+                group_results = await asyncio.wait_for(
+                    asyncio.gather(*group_tasks, return_exceptions=True),
+                    timeout=360  # 6 dakika
+                )
+            except asyncio.TimeoutError:
+                logger.error("GLOBAL TIMEOUT: group mail tasks exceeded 300 seconds")
+                # tüm grup job’ları fail yap
+                for idx in group_indices:
+                    results.append({
+                        "job_index": idx,
+                        "success": False,
+                        "error": "Global timeout (5 min) while sending group mails"
+                    })
+                group_results = []
+                # bulk işlemler yine çalışır
+
+            # group_results varsa (timeout olmadıysa) ekle
             for res in group_results:
                 results.append(res)
-
+       
+        
+        
         # 3) bulk jobs (serial; usually only 1)
         for i, job in enumerate(jobs):
             if job.get("type") == "bulk":
@@ -268,8 +306,10 @@ class MailerV2:
 
         return results
 
-
+    # ------------------------------------------------------------
     # low-level send wrapper with semaphore and retry/backoff
+    # grup maİllerİ gönderimi: 2/2 - görevlerin gönderimini yapar
+    # ------------------------------------------------------------
     async def _send_with_controls(self, message: EmailMessage, recipients: List[str], max_retries: int = 2) -> bool:
         # semaphore limits parallel sends to avoid overwhelming SMTP
         async with self._semaphore:
@@ -439,8 +479,6 @@ class MailerV2:
         body = (f"Merhaba,\n\nTelefon data dosyası ektedir.\nDosya: {input_path.name}\n\nİyi çalışmalar,\nData_listesi_Hıdır")
 
         return await self.send_email_with_attachment([input_email], subject, body, input_path, max_retries=max_retries)
-
-
 
 # helper outside class
 async def _wrap_job(coro, job_index):
