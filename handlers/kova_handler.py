@@ -31,7 +31,9 @@ class ProcessingStates(StatesGroup):
 
 # Sabitler
 CANCEL_COMMANDS = {"cancel", "iptal", "stop", "dur", "🛑 dur"}
-EXCEL_EXTENSIONS = {'.xlsx', '.xls'}
+# EXCEL_EXTENSIONS = {'.xlsx', '.xls'}
+EXCEL_EXTENSIONS = {ext.lower() for ext in [".xlsx", ".xls"]}
+
 REQUIRED_COLUMNS = {"TARİH", "İL"}
 
 def _validate_excel_file(file_path: Path) -> Dict[str, Any]:
@@ -94,6 +96,7 @@ async def _download_user_file(bot, file_id: str, file_name: str) -> Path:
     except Exception as e:
         logger.error(f"Dosya indirme hatası: {e}")
         raise
+
 
 async def _process_uploaded_file(message: Message, file_path: Path) -> Dict[str, Any]:
     """
@@ -170,11 +173,8 @@ async def handle_cancel_command(message: Message, state: FSMContext):
 
 # Excel dosyası yükleme handler
 
-@router.message(ProcessingStates.waiting_for_file, F.document)
+"""@router.message(ProcessingStates.waiting_for_file, F.document)
 async def handle_excel_upload(message: Message, state: FSMContext):
-    """
-    Excel dosyası yükleme handler'ı - DÜZELTİLMİŞ VERSİYON
-    """
     file_name = message.document.file_name
     file_ext = Path(file_name).suffix.lower()
     
@@ -246,6 +246,85 @@ async def handle_excel_upload(message: Message, state: FSMContext):
             except Exception as e:
                 logger.warning(f"Dosya silinemedi {file_path}: {e}")
         await state.clear()
+"""
+
+@router.message(ProcessingStates.waiting_for_file, F.document)
+async def handle_excel_upload(message: Message, state: FSMContext):
+    """
+    Excel dosyası yükleme handler'ı - UZUN VADELİ FİNAL VERSİYON
+    """
+
+    original_name = message.document.file_name
+
+    # Uzantıyı küçült
+    file_ext = Path(original_name).suffix.lower()
+
+    # Uzantı kontrolü (kullanıcı .XLS bile gönderse çalışır)
+    if file_ext not in EXCEL_EXTENSIONS:
+        await message.answer("❌ Lütfen Excel dosyası (.xlsx veya .xls) gönderin.")
+        await state.clear()
+        return
+
+    # Dosya adını normalize et (KULLANICI NE YAZARSA YAZSIN temiz format)
+    clean_name = Path(original_name).stem
+    normalized_name = f"{clean_name}{file_ext}"   # Örn: RAPOR.XLSX → RAPOR.xlsx
+
+    file_path = None
+
+    try:
+        logger.info(f"Dosya alındı: {original_name}, Boyut: {message.document.file_size}")
+
+        # 1. Dosyayı normalize edilmiş isimle indir
+        await message.answer("📥 Dosya indiriliyor...")
+        file_path = await _download_user_file(
+            message.bot,
+            message.document.file_id,
+            normalized_name  # ← ARTIK HER ZAMAN KÜÇÜK HARFLİ UZANTI
+        )
+        logger.info(f"Dosya indirme tamamlandı: {file_path}")
+
+        # 2. Doğrulama
+        await message.answer("🔍 Dosya kontrol ediliyor...")
+        validation_result = _validate_excel_file(file_path)
+        if not validation_result["valid"]:
+            await message.answer(f"❌ {validation_result['message']}")
+            await state.clear()
+            return
+
+        logger.info(f"Doğrulama başarılı: {validation_result['row_count']} satır")
+
+        # 3. Dosya işleme
+        await message.answer("⏳ Dosya işleniyor, lütfen bekleyin...")
+        task_result = await _process_uploaded_file(message, file_path)
+
+        if task_result["success"]:
+            report = await generate_processing_report(task_result)
+            await message.answer(report)
+            logger.info("İşlem başarıyla tamamlandı")
+        else:
+            error_msg = f"❌ {task_result['error']}"
+            if len(error_msg) > 1000:
+                error_msg = error_msg[:1000] + "... (devamı loglarda)"
+            await message.answer(error_msg)
+            logger.error(f"İşlem hatası: {task_result['error']}")
+
+    except Exception as e:
+        error_msg = str(e)
+        if len(error_msg) > 500:
+            error_msg = error_msg[:500] + "..."
+        await message.answer(f"❌ İşlem sırasında hata oluştu: {error_msg}")
+        logger.error(traceback.format_exc())
+
+    finally:
+        if file_path and file_path.exists():
+            try:
+                file_path.unlink()
+                logger.info(f"Geçici dosya silindi: {file_path}")
+            except Exception as e:
+                logger.warning(f"Dosya silinemedi {file_path}: {e}")
+        await state.clear()
+
+
 
 @router.message(ProcessingStates.waiting_for_file)
 async def handle_wrong_file_type(message: Message):
