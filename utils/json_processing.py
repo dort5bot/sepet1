@@ -2,6 +2,15 @@
 """
 Excel dosyasını işleyerek groups.json dosyası oluşturur.
 openpyxl ile
+
+*Türkçe karakterleri olduğu gibi koru
+-bot içindeki yapılar çevirsin-
+Türkçe karakterleri ASCII’ye çevir
+İstanbul → Istanbul
+Çorum → Corum
+Şırnak → Sirnak
+
+
 """
 import os
 import json
