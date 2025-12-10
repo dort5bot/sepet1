@@ -210,68 +210,115 @@ async def handle_wrong_pex_input(message: Message):
 # PEX dosyalarını gruplara dağıtır - TEK MAIL ÇOKLU DOSYA
 # PEX dosyalarını GRUP bazlı paralel dağıtır
 # ← rapor sıralaması
+# 1) GRUP BAZLI TOPLAMA
+# 2) Her grup için tek mail
+# Tek mail, çoklu dosya gönderir
+
 async def _process_pex_distribution_parallel(pex_files: List[Dict]) -> Dict:
-    """PEX dosyalarını GRUP bazlı paralel dağıtır – her grup tek mail."""
+    """ bu bölüm içinde silme olmayacak, sonra mail eksik oluyor.
+    tüm işlemler bittikten sonra silme işlemi zaten vars
+    """
     try:
         tasks = []
-        order_map = []         # ← EKLENDİ (task sırası)
+        order_map = []
         groups_processed = set()
 
-        # Şehir bazlı grupla
-        city_map = {}
-        for f in pex_files:
-            city_map.setdefault(f["city_name"], []).append(f)
-
         mailer = await get_pex_mailer()
+        group_map = {}  # group_id -> list[files]
 
-        # Her şehir → tek mail çok dosya
-        for city_name, files_for_city in city_map.items():
-            normalized_city = group_manager.normalize_city_name(city_name)
+        # -----------------------------
+        # 1) ŞEHİR → GRUP EŞLEŞTİRME | TOPLAMA
+        # -----------------------------
+        for f in pex_files:
+            normalized_city = group_manager.normalize_city_name(f["city_name"])
             group_ids = await group_manager.get_groups_for_city(normalized_city)
 
-            for group_id in group_ids:
-                group_info = await group_manager.get_group_info(group_id)
-                recipients = group_info.get("email_recipients", [])
+            for gid in group_ids:
+                group_map.setdefault(gid, []).append(f)
 
-                if not recipients:
-                    continue
+        # -----------------------------
+        # 2) GRUP → TEK MAIL + ÇOK DOSYA
+        # -----------------------------
+        for idx, (group_id, files_for_group) in enumerate(group_map.items()):
+            group_info = await group_manager.get_group_info(group_id)
+            recipients = group_info.get("email_recipients", [])
 
-                # task order kaydı
-                order_map.append({
-                    "city": city_name,
-                    "group_id": group_id,
-                    "files": files_for_city,
-                    "group_info": group_info
-                })
+            if not recipients:
+                continue
 
-                tasks.append(asyncio.create_task(
-                    _send_group_files_single_mail(files_for_city, group_info, recipients)
-                ))
+            order_map.append({
+                "order": idx,
+                "group_id": group_id,
+                "files": files_for_group,
+                "group_info": group_info
+            })
 
-                groups_processed.add(group_id)
+            tasks.append(asyncio.create_task(
+                _send_group_files_single_mail(
+                    files_for_group,
+                    group_info,
+                    recipients
+                )
+            ))
 
-        # Paralel çalıştır
+            groups_processed.add(group_id)
+
+        # -----------------------------
+        # 3) GÖNDERİMLERİ BEKLE
+        # -----------------------------
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # SIRALI şekilde normalize et
-        email_results = []
-        for idx, task_info in enumerate(order_map):
-            success = bool(results[idx])
-            files = task_info["files"]
-            group_info = task_info["group_info"]
-            group_id = task_info["group_id"]
+        # -----------------------------
+        # 4) DOSYALARI GEÇ SİL (ÖNEMLİ)
+        # -----------------------------
+        # await asyncio.sleep(1.5)  # SMTP'nin okumayı bitirmesi için güvenlik
+        # await _cleanup_pex_files(pex_files)
 
+        # -----------------------------
+        # 4) RAPOR FORMATLA - rapor sayısı - 
+        # -----------------------------
+        email_results = []
+        for idx, entry in enumerate(order_map):
+            success = not isinstance(results[idx], Exception)
+            files = entry["files"]
+            group_info = entry["group_info"]
+            group_id = entry["group_id"]
             recipients = group_info.get("email_recipients", [])
+
+            """
+            for r in recipients:
+                for f in files:
+                    email_results.append({
+                        "order": idx,
+                        "success": success,
+                        "group_id": group_id,
+                        "recipient": r
+                        "filename": f["filename"],
+                        "city": f["city_name"]
+                    })
+            """
 
             for r in recipients:
                 email_results.append({
-                    "order": idx,                   # ← rapor sıralaması
+                    "order": idx,
                     "success": success,
                     "group_id": group_id,
-                    "recipient": r,
-                    "file_count": len(files),
-                    "city": task_info["city"]
+                    "recipient": r
                 })
+
+
+
+        # Hiç mail atılmadıysa rapora ek bilgi
+        if not email_results:
+            email_results.append({
+                "order": -1,
+                "success": False,
+                "group_id": None,
+                "recipient": None,
+                "filename": None,
+                "city": None,
+                "note": "Hiçbir gruba mail gönderilmedi."
+            })
 
         return {
             "success": True,
@@ -283,38 +330,54 @@ async def _process_pex_distribution_parallel(pex_files: List[Dict]) -> Dict:
         logger.error(f"PEX dağıtım hatası: {e}")
         return {"success": False, "error": str(e)}
 
-
-
 # Fonksiyonları güncelle:
+# Gruba tüm dosyaları TEK MAIL olarak gönderir
 
 async def _send_group_files_single_mail(file_list: List[Dict], group_info: Dict, recipients: List[str]) -> bool:
     """Gruba tüm dosyaları TEK MAIL olarak gönderir"""
     try:
         if not file_list:
             return False
-            
+
         group_name = group_info.get("group_name", "Grup")
-        file_paths = [f['path'] for f in file_list if f['path'].exists()]
-        
+
+        # Dosya yollarını güvenli şekilde hazırlıyoruz
+        file_paths = []
+        for f in file_list:
+            p = Path(f["path"])
+            if p.exists():
+                file_paths.append(p)
+
         if not file_paths:
-            logger.warning("❌ Gönderilecek dosya bulunamadı")
+            logger.warning(f"❌ {group_name}: Gönderilecek dosya bulunamadı")
             return False
-        
-        # Mail içeriği hazırla
+
+        # Mail içeriği
         subject, body = _prepare_group_email_content(file_list, group_info)
-        
-        # Mailer instance al ve gönder
+
+        # Mailer
         mailer = await get_pex_mailer()
-        success = await mailer.send_email_with_multiple_attachments(
-            recipients, subject, body, file_paths
-        )
-        
-        logger.info(f"{'✅' if success else '❌'} {group_name} → {len(file_list)} dosya")
+
+        # Gönder
+        success = True
+        for r in recipients:
+            ok = await mailer.send_email_with_multiple_attachments(
+                [r],  # TEK ALICI
+                subject,
+                body,
+                file_paths
+            )
+            if not ok:
+                success = False
+
+
+        logger.info(f"{'✅' if success else '❌'} {group_name} → {len(file_paths)} dosya gönderildi")
         return success
-        
+
     except Exception as e:
-        logger.error(f"❌ Grup mail hatası: {e}")
+        logger.error(f"❌ Grup mail hatası ({group_info.get('group_name')}): {e}")
         return False
+
 
 async def _send_all_files_to_input_email(pex_files: List[Dict]) -> bool:
     """Tüm dosyaları INPUT_EMAIL'e TEK MAIL olarak gönderir"""
@@ -382,9 +445,23 @@ async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count:
 
     groups_processed = len(result.get("groups_processed", []))
     
-    successful_emails = sum(1 for res in email_results if res.get("success", False))
-    failed_emails = len(email_results) - successful_emails
+    # successful_emails = sum(1 for res in email_results if res.get("success", False))
+    # failed_emails = len(email_results) - successful_emails
     
+    # Başarıyla gönderilmiş tüm gerçek mail satırlarının sayılması
+    successful_emails = sum(
+        1 for res in email_results
+        if res.get("success") and res.get("recipient")
+    )
+
+    failed_emails = sum(
+        1 for res in email_results
+        if not res.get("success") and res.get("recipient")
+    )
+
+
+
+
     # -------------------------------------------------------
     # 2) Raporun temel satırları
     # -------------------------------------------------------
@@ -392,7 +469,7 @@ async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count:
         "✅ **Pdf Excel Dağıtım Raporu**",
         f"⏰ İşlem zamanı: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
         "",
-        f"📂 Oluşturulan grup dosyası: {file_count}",
+        f"📂 Eklenen(İnput) dosya: {file_count}",
         f"👥 İşlenen grup sayısı: {groups_processed}",
         f"📧 Başarılı mail: {successful_emails}",
         f"❌ Başarısız mail: {failed_emails}",
@@ -428,7 +505,6 @@ async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count:
             report_lines.append(f"• {group_name}: {cities_str}")
     
     return "\n".join(report_lines)
-
 
 
 async def _cleanup_pex_files(pex_files: List[Dict]):
