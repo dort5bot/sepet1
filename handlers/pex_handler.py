@@ -75,7 +75,9 @@ async def cmd_pex(message: Message, state: FSMContext):
         "📋 **KURALLAR:**\n"
         "• Dosya adı SADECE  şehir adı olmalı: ankara gibi\n"
         "• Desteklenen formatlar: PDF, Excel (.xls, .xlsx)\n"
-        "• Dosyaları TEK TEK gönder(en iyisi bu yöntem)\n\n"
+        "• ilk dosyayı TEK gönder(en iyisi bu yöntem)\n"
+        "• sonra TOPLU gönderilebilir\n\n"
+        
         "🔄 **İŞLEM:**\n"
         "1. Dosya adındaki şehir gruplarda aranır\n"
         "2. Eşleşen tüm gruplara dosya gönderilir\n"
