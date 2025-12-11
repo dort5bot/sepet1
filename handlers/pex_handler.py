@@ -270,11 +270,6 @@ async def _process_pex_distribution_parallel(pex_files: List[Dict]) -> Dict:
         # -----------------------------
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # -----------------------------
-        # 4) DOSYALARI GEÇ SİL (ÖNEMLİ)
-        # -----------------------------
-        # await asyncio.sleep(1.5)  # SMTP'nin okumayı bitirmesi için güvenlik
-        # await _cleanup_pex_files(pex_files)
 
         # -----------------------------
         # 4) RAPOR FORMATLA - rapor sayısı - 
@@ -287,17 +282,15 @@ async def _process_pex_distribution_parallel(pex_files: List[Dict]) -> Dict:
             group_id = entry["group_id"]
             recipients = group_info.get("email_recipients", [])
 
-            """
+            """ MAİL SAYISI SORUNU ÇÖZÜLDÜ, RAPOR YAPISI EKSİLDİ
             for r in recipients:
-                for f in files:
-                    email_results.append({
-                        "order": idx,
-                        "success": success,
-                        "group_id": group_id,
-                        "recipient": r
-                        "filename": f["filename"],
-                        "city": f["city_name"]
-                    })
+                email_results.append({
+                    "order": idx,
+                    "success": success,
+                    "group_id": group_id,
+                    "recipient": r,
+                    
+                })
             """
 
             for r in recipients:
@@ -305,9 +298,13 @@ async def _process_pex_distribution_parallel(pex_files: List[Dict]) -> Dict:
                     "order": idx,
                     "success": success,
                     "group_id": group_id,
-                    "recipient": r
+                    "recipient": r,
+                    # Dosya/şehir bilgisini liste olarak ekliyoruz
+                    "files": [
+                        {"filename": f["filename"], "city": f["city_name"]}
+                        for f in files
+                    ]
                 })
-
 
 
         # Hiç mail atılmadıysa rapora ek bilgi
@@ -432,10 +429,10 @@ def _prepare_group_email_content(file_list: List[Dict], group_info: Dict) -> tup
 
 
 # PEX işleme raporu oluşturur
-
-async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count: int) -> str:
     """PEX işleme raporu oluşturur (sıralı email_results + düzenli grup özeti)"""
     
+"""async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count: int) -> str:
+
     # Başarısız ise direkt hata dön
     if not result.get("success", False):
         return f"❌ PEX işleme başarısız: {result.get('error', 'Bilinmeyen hata')}"
@@ -506,6 +503,86 @@ async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count:
             cities_str = ", ".join(sorted(group_cities[group_id]))
             report_lines.append(f"• {group_name}: {cities_str}")
     
+    return "\n".join(report_lines)
+"""
+
+async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count: int) -> str:
+    """PEX işleme raporu oluşturur (sıralı email_results + düzenli grup özeti)"""
+
+    # Başarısız ise direkt hata dön
+    if not result.get("success", False):
+        return f"❌ PEX işleme başarısız: {result.get('error', 'Bilinmeyen hata')}"
+
+    email_results = result.get("email_results", [])
+    groups_processed = len(result.get("groups_processed", []))
+
+    # -------------------------------------------------------
+    # ---------- Grup bazlı başarı/başarısızlık hesapla ----------
+    # email_results içinde birden fazla alıcı satırı olabilir; buradan grup bazlı durumu çıkarıyoruz.
+    group_status: Dict = {}
+    for res in email_results:
+        gid = res.get("group_id")
+        if gid is None:
+            continue
+        # Eğer herhangi bir satırda success True ise o grup başarılı kabul edilir
+        prev = group_status.get(gid, False)
+        group_status[gid] = prev or bool(res.get("success"))
+
+    successful_groups = sum(1 for ok in group_status.values() if ok)
+    failed_groups = sum(1 for ok in group_status.values() if not ok)
+
+    # Input mail varsa bunu "başarılı mail" sayımına ekleyelim (ör. input gönderildi -> +1)
+    successful_emails = successful_groups + (1 if input_email_sent else 0)
+    failed_emails = failed_groups + (0 if input_email_sent else 0 if input_email_sent else 0)
+
+    # -------------------------------------------------------
+    # ---------- Grup bazlı şehir listesini oluştur ----------
+    group_cities: Dict[str, set] = {}
+    for res in email_results:
+        gid = res.get("group_id")
+        if gid is None:
+            continue
+
+        # Öncelik: res içinde "files" listesi varsa ondan şehirleri al
+        files = res.get("files")
+        if files and isinstance(files, list):
+            for f in files:
+                city = (f.get("city") or f.get("city_name") or "").strip().upper()
+                if city:
+                    group_cities.setdefault(gid, set()).add(city)
+            continue
+
+        # Eğer "files" yoksa, eski tekil alanları kontrol et
+        city = (res.get("city") or res.get("city_name") or "").strip().upper()
+        if city:
+            group_cities.setdefault(gid, set()).add(city)
+
+    # -------------------------------------------------------
+    # ---------- Rapor satırlarını hazırla ----------
+    report_lines = [
+        "✅ **Pdf Excel Dağıtım Raporu**",
+        f"⏰ İşlem zamanı: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+        "",
+        f"📂 Eklenen(İnput) dosya: {file_count}",
+        f"👥 İşlenen grup sayısı: {groups_processed}",
+        f"📧 Başarılı mail: {successful_emails}",
+        f"❌ Başarısız mail: {failed_emails}",
+        f"📥 Input mail: {'✅ Gönderildi' if input_email_sent else '❌ Gönderilmedi'}"
+    ]
+
+    # -------------------------------------------------------
+    # Grup bazlı özet (grup adı ve şehirler)
+    if groups_processed > 0 and group_cities:
+        report_lines.append("")
+        report_lines.append("📋 *Grup Dosyaları:*")
+
+        for gid, cities in group_cities.items():
+            # group_name almak için group_manager kullan
+            group_info = await group_manager.get_group_info(gid)
+            group_name = group_info.get("group_name", gid)
+            cities_str = ", ".join(sorted(cities)) if cities else "—"
+            report_lines.append(f"• {group_name}: {cities_str}")
+
     return "\n".join(report_lines)
 
 
