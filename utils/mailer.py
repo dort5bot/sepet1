@@ -11,6 +11,7 @@ Mailer V6 - Hybrid (Connection Pool + Group Parallel / Input & Bulk Serial)
 - Keeps public API names compatible: get_default_mailer, MailerV2, send_batch, send_email_with_attachment, ...
 """
 
+# utils/mailer.py
 import asyncio
 import logging
 import ssl
@@ -38,11 +39,11 @@ DEFAULTS = {
     "PER_DOMAIN_CONCURRENCY": 1,
     "CONNECT_TIMEOUT": 5,
     "LOGIN_TIMEOUT": 5,
-    "SEND_TIMEOUT": 10,
+    "SEND_TIMEOUT": 30,
     "MAX_SEND_RETRIES": 2,
     "CONNECT_RETRIES": 2,
     "MAX_ATTACHMENT_SIZE_MB": 15,
-    "CIRCUIT_BREAKER_FAILURES": 8,
+    "CIRCUIT_BREAKER_FAILURES": 20,
     "CIRCUIT_BREAKER_WINDOW_SEC": 300,
     "CIRCUIT_BREAKER_COOLDOWN_SEC": 300,
 }
@@ -265,20 +266,33 @@ class SMTPConnectionPool:
             wrapper = await self._queue.get()
         return wrapper
 
+
     async def put(self, wrapper: SMTPClientWrapper) -> None:
-        # If wrapper is not healthy, try to recreate it before putting back
+        # Eğer wrapper sağlıksızsa yeniden oluşturmayı dene
         if not wrapper.healthy:
             try:
                 await wrapper.quit()
-            except Exception:
+            except:
                 pass
-            # attempt to recreate once
-            recreated = await wrapper.create_and_connect(self.username, self.password, self.connect_timeout, self.login_timeout)
+
+            # YENİ EKLENEN KISIM: self-healing SMTP client yeniden yaratma
+            recreated = await wrapper.create_and_connect(
+                self.username,
+                self.password,
+                self.connect_timeout,
+                self.login_timeout
+            )
+
             if not recreated:
-                # drop it, do not put back
-                logger.warning("Dropping unhealthy SMTP client from pool")
+                # bu client tamamen çöktüyse havuza geri koymuyoruz
+                logger.warning("SMTP client dropped and could not be recreated")
                 return
+
+            logger.info("SMTP client successfully recreated and added back to pool")
+
+        # buraya gelindiyse sağlıklı veya onarılan client havuza eklenir
         await self._queue.put(wrapper)
+
 
     async def close_all(self):
         # empty queue and quit all clients
@@ -288,6 +302,9 @@ class SMTPConnectionPool:
                 await wrapper.quit()
             except Exception:
                 pass
+
+
+
 
 
 # -------------------------
@@ -642,6 +659,7 @@ class MailerV2:
                     a = att[0]
                     if isinstance(a, (str, Path)):
                         attachment_path = Path(a)
+                        
                 # create EmailMessage once, attach later in coroutine
                 async def group_send_coro(index: int, to_emails: List[str], subject: str, body_text: str, attachment_p: Optional[Path]):
                     try:
