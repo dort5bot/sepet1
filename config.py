@@ -47,8 +47,22 @@ class EmailConfig:
     INPUT_EMAIL: str = os.getenv("INPUT_EMAIL", "")
     
     def __post_init__(self):
+
+        # 1) Eğer ENV'den string geliyorsa parse et
+        if isinstance(self.SMTP_PORTS, str):
+            self.SMTP_PORTS = [
+                int(x.strip()) for x in self.SMTP_PORTS.split(",") if x.strip().isdigit()
+            ]
+
+        # 2) Hâlâ boşsa fallback kullan
         if not self.SMTP_PORTS:
-            self.SMTP_PORTS = parse_smtp_ports(self.SMTP_SERVER)
+            self.SMTP_PORTS = [465, 587]
+
+
+
+
+
+ 
 
 @dataclass
 class WebhookConfig:
