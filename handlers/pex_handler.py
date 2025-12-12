@@ -98,11 +98,12 @@ async def cmd_pex(message: Message, state: FSMContext):
     await state.set_state(PexProcessingStates.waiting_for_files)
     await message.answer(
         "📁 **PEX MODU - DOSYA ADI BAZLI DAĞITIM**\n\n"
-        "Lütfen dağıtmak istediğiniz dosyaları gönderin.\n\n"
+        # "Lütfen dağıtmak istediğiniz dosyaları gönderin.\n\n"
         "📋 **KURALLAR:**\n"
         "• Dosya adı SADECE  şehir adı olmalı: ankara gibi\n"
-        "• Desteklenen formatlar: PDF, Excel (.xls, .xlsx)\n"
-        "• ilk dosyayı TEK gönder(en iyisi bu yöntem)\n"
+        "• Desteklenenler: PDF, Excel, Word, resim, arşiv)\n\n"
+        
+        "• ilk dosyayı TEK gönder(zorunlu)\n"
         "• sonra TOPLU gönderilebilir\n\n"
         
         "🔄 **İŞLEM:**\n"
@@ -110,19 +111,29 @@ async def cmd_pex(message: Message, state: FSMContext):
         "2. Eşleşen tüm gruplara dosya gönderilir\n"
         "3. Her grup kendi email listesine ulaşır\n\n"
         "📤 **DOSYA BEKLİYORUM...**\n"
-        "Lütfen PDF veya Excel dosyası gönderin.\n\n"
-        "🛑 İptal etmek için '/iptal' komutunu kullanın veya DUR butonuna basın."
+        "Lütfen dosya gönderin.\n\n"
+        "🛑 İptal için '/iptal' komutu kullan veya DUR a bas."
     )
 
 @router.message(PexProcessingStates.waiting_for_files, F.document)
 async def handle_pex_file_upload(message: Message, state: FSMContext):
     """PEX dosyalarını işler"""
     # Dosya formatı kontrolü
-    valid_extensions = {'.pdf', '.xls', '.xlsx'}
+    valid_extensions = {
+        # Mevcut formatlar
+        '.pdf', '.xls', '.xlsx',
+        # Yeni eklenen formatlar
+        '.csv', '.doc', '.docx', '.txt', '.rtf',
+        '.ppt', '.pptx', '.odt', '.ods', '.odp',
+        '.jpg', '.jpeg', '.png', '.gif', '.bmp',
+        '.zip', '.rar', '.7z'
+    }
+    
+    
     file_ext = Path(message.document.file_name).suffix.lower()
     
     if file_ext not in valid_extensions:
-        await message.answer("❌ Desteklenmeyen dosya formatı. PDF veya Excel gönderin.")
+        await message.answer("❌ Desteklenmeyen dosya formatı. -yalnız: pdf, doc, docx, excel, csv, zip, jpg, jpeg, png, ...")
         return
     
     try:
@@ -154,7 +165,7 @@ async def handle_pex_file_upload(message: Message, state: FSMContext):
             f"🏙️  Algılanan şehir: {city_name.upper()}\n"
             f"📁 Toplam dosya: {len(pex_files)}\n\n"
             "📤 *DOSYA BEKLİYORUM...*\n\n"
-            "Dosya varsa ekle, yoksa başlatmak için '/tamam' yaz tıkla.\n\n"
+            "Dosya varsa ekle, dağıtmak için '/tamam' tıkla yada yaz\n\n"
             "🛑 İptal için '/iptal' veya DUR butonu"
         )
         
@@ -185,7 +196,7 @@ async def handle_process_pex(message: Message, state: FSMContext):
         # -------------------------------
         # AŞAMA 1 + AŞAMA 2 → paralel
         # -------------------------------
-        task_input = asyncio.create_task(_send_input_email(pex_files))  # YENİ FONKSİYON
+        task_input = asyncio.create_task(_send_input_email(pex_files))  
         task_groups = asyncio.create_task(_process_pex_distribution_parallel(pex_files))
 
         input_email_sent, group_result = await asyncio.gather(task_input, task_groups)
@@ -318,7 +329,6 @@ async def _send_group_mail_with_files(
         return False
 
 
-# ==================== GÜNCELLENEN FONKSİYON ====================
 async def _process_pex_distribution_parallel(pex_files: List[Dict]) -> Dict:
     """ 
     PEX dosyalarını GRUP bazlı paralel dağıtır
