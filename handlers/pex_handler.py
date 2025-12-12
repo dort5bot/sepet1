@@ -101,10 +101,10 @@ async def cmd_pex(message: Message, state: FSMContext):
         # "Lütfen dağıtmak istediğiniz dosyaları gönderin.\n\n"
         "📋 **KURALLAR:**\n"
         "• Dosya adı SADECE  şehir adı olmalı: ankara gibi\n"
-        "• Desteklenenler: PDF, Excel, Word, resim, arşiv)\n\n"
+        "• Desteklenenler: PDF, Excel, Word, resim, arşiv\n\n"
         
         "• ilk dosyayı TEK gönder(zorunlu)\n"
-        "• sonra TOPLU gönderilebilir\n\n"
+        "• sonrakiler TOPLU gönderilebilir\n\n"
         
         "🔄 **İŞLEM:**\n"
         "1. Dosya adındaki şehir gruplarda aranır\n"
@@ -557,7 +557,7 @@ async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count:
     
     if groups_processed > 0 and group_cities:
         report_lines.append("")
-        report_lines.append(f"📋 *Grup Dosyaları ({groups_processed}):")
+        report_lines.append(f"📋 *Grup Dosyaları ({groups_processed})*")
         # report_lines.append(f"📋 *Grup Dosyaları ({groups_processed - 1}):")
 
         for gid, cities in group_cities.items():
