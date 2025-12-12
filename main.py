@@ -17,7 +17,7 @@ from aiohttp import web
 from config import config
 
 from utils.handler_loader import HandlerLoader
-from utils.mailer import get_default_mailer # Mailer.stop için
+# from utils.mailer import get_default_mailer # Mailer.stop için
 
 from utils.logger import setup_logger, logger
 # Logger kurulumu
@@ -128,13 +128,8 @@ class BotServer:
         logger.info("🔴 Bot durduruluyor...")
 
         # 1) SMTP bağlantısını temizle (kritik)
-        try:
-            from utils.mailer import get_default_mailer
-            mailer = await get_default_mailer()
-            await mailer.stop()
-            logger.info("📨 Mailer SMTP bağlantısı kapatıldı")
-        except Exception as e:
-            logger.error(f"Mailer kapatılırken hata: {e}")
+        # mail2 yapıısnda bu gereksiz
+
 
         # 2) Webhook kapat
         if self.webhook_runner:
@@ -147,12 +142,6 @@ class BotServer:
             logger.info("✅ Bot session kapatıldı")
 
         logger.info("✅ Bot başarıyla durduruldu")
-
-
-
-
-
-
 
 
 async def main():
