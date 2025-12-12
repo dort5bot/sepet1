@@ -101,7 +101,7 @@ async def generate_processing_report(result: Dict, report_type: str = "mail") ->
         # ---------------------------------------------------------------
         # 7) GRUP DOSYALARI
         # ---------------------------------------------------------------
-        report_lines.extend(["", "📁 *Grup Dosyaları:*"])
+        report_lines.extend(["",  f"📁 *Grup Dosyaları:  ({successful_group_emails-1})*"])
 
         for group_id, file_info in output_files.items():
             filename = file_info.get("filename", "bilinmeyen")
