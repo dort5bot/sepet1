@@ -212,7 +212,6 @@ async def _send_input_email(pex_files: List[Dict]) -> bool:
         return False
 
 
-
 def _prepare_group_email_content(file_list: List[Dict], group_info: Dict) -> tuple:
     """
     Grup için email içeriğini hazırlar
@@ -308,9 +307,9 @@ async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count:
     return "\n".join(report_lines)
 
 
+# PEX işlemini başlat - (RAPOR MAILI EKLENDİ)
+# Input mail → Grup mailleri  → Personal mail
 
- 
- 
 @router.message(Command("pex"))
 async def cmd_pex(message: Message, state: FSMContext):
     """PEX - Dosya adı bazlı dağıtım komutu"""
@@ -395,62 +394,6 @@ async def handle_pex_file_upload(message: Message, state: FSMContext):
         await message.answer("❌ Dosya işlenirken hata oluştu.")
 
 
-# handle_process_pex fonksiyonundaki mail gönderim kısmını değiştirin
-# PEX işlemini başlat - (RAPOR MAILI EKLENDİ)
-"""PEX işlemini başlat (Aşama 1 + 2 seri, rapor bağımlı)"""
-    
-# @router.message(PexProcessingStates.waiting_for_files, F.text == "/tamam")
-"""async def handle_process_pex(message: Message, state: FSMContext):
-    data = await state.get_data()
-    pex_files = data.get("pex_files", [])
-
-    if not pex_files:
-        await message.answer("❌ İşlenecek dosya yok.")
-        await state.clear()
-        return
-
-    await message.answer("⏳ PEX dağıtım işlemi başlıyor...\n"
-                         "işlemde  1.(Input mail) + 2.(Grup mailleri) seri çalışır...")
-
-    try:
-        # -------------------------------
-        # AŞAMA 1 + AŞAMA 2 → seri
-        # -------------------------------
-        task_input = asyncio.create_task(_send_input_email(pex_files))  
-        task_groups = asyncio.create_task(send_pex_mail(pex_files))
-
-        input_email_sent, group_result = await asyncio.gather(task_input, task_groups)
-
-        # -------------------------------
-        # AŞAMA 3 → RAPOR oluşturma (BAĞIMLI)
-        # -------------------------------
-        report = await _generate_pex_report(group_result, input_email_sent, len(pex_files))
-        await message.answer(report)
-
-        # Raporu personal email'e gönder - YENİ SİSTEM
-        if config.email.PERSONAL_EMAIL:
-            await send_email(
-                to_emails=[config.email.PERSONAL_EMAIL],
-                subject=f"📊 PEX Raporu - {len(pex_files)} Dosya",
-                body=report,
-                html_body=None,  # veya HTML versiyonu
-                attachments=None  # rapor ekli değil
-            )
-
-
-
-    except Exception as e:
-        logger.error(f"PEX işleme hatası: {e}")
-        await message.answer("❌ PEX işleme sırasında hata oluştu.")
-
-    finally:
-        await _cleanup_pex_files(pex_files)
-        await state.clear()
-"""
-
-
-# Input mail → Grup mailleri  → Personal mail
-
 @router.message(PexProcessingStates.waiting_for_files, F.text == "/tamam")
 async def handle_process_pex(message: Message, state: FSMContext):
     """PEX işlemini başlat (Aşama 1 + 2 seri, rapor bağımlı)"""
@@ -516,7 +459,6 @@ async def handle_wrong_pex_input(message: Message):
 
 
 # ================== diğer komut butonları ==============================
-
 
 # İptal komutları ve butonları
 @router.message(PexProcessingStates.waiting_for_files, F.text.in_(["/dur", "/stop", "/cancel", "/iptal"]))
