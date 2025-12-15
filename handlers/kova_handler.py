@@ -173,81 +173,6 @@ async def handle_cancel_command(message: Message, state: FSMContext):
 
 # Excel dosyası yükleme handler
 
-"""@router.message(ProcessingStates.waiting_for_file, F.document)
-async def handle_excel_upload(message: Message, state: FSMContext):
-    file_name = message.document.file_name
-    file_ext = Path(file_name).suffix.lower()
-    
-    # Dosya formatı kontrolü
-    if file_ext not in EXCEL_EXTENSIONS:
-        await message.answer("❌ Lütfen Excel dosyası (.xlsx veya .xls) gönderin.")
-        await state.clear()
-        return
-    
-    file_path = None
-    try:
-        logger.info(f"Dosya alındı: {file_name}, Boyut: {message.document.file_size}")
-        
-        # 1. Dosyayı indir
-        await message.answer("📥 Dosya indiriliyor...")
-        file_path = await _download_user_file(
-            message.bot, 
-            message.document.file_id, 
-            file_name
-        )
-        logger.info(f"Dosya indirme tamamlandı: {file_path}")
-        
-        # 2. Doğrulama
-        await message.answer("🔍 Dosya kontrol ediliyor...")
-        validation_result = _validate_excel_file(file_path)
-        if not validation_result["valid"]:
-            await message.answer(f"❌ {validation_result['message']}")
-            await state.clear()
-            return
-        
-        logger.info(f"Doğrulama başarılı: {validation_result['row_count']} satır")
-        
-        # 3. İşleme - HATA YAKALAMA İLE
-        await message.answer("⏳ Dosya işleniyor, lütfen bekleyin...")
-        task_result = await _process_uploaded_file(message, file_path)
-        
-        if task_result["success"]:
-            # Rapor oluştur ve gönder - ASYNC DÜZELTME
-            report = await generate_processing_report(task_result)  # ✅ await EKLENDİ
-            await message.answer(report)
-            logger.info("İşlem başarıyla tamamlandı")
-        else:
-            error_msg = f"❌ {task_result['error']}"
-            # Hata mesajını kısalt
-            if len(error_msg) > 1000:
-                error_msg = error_msg[:1000] + "... (devamı loglarda)"
-            await message.answer(error_msg)
-            logger.error(f"İşlem hatası: {task_result['error']}")
-        
-    except Exception as e:
-        # HATA MESAJINI KISALT - KRİTİK DÜZELTME
-        error_msg = str(e)
-        if len(error_msg) > 500:
-            error_msg = error_msg[:500] + "..."
-        
-        error_detail = f"❌ İşlem sırasında hata oluştu: {error_msg}"
-        await message.answer(error_detail)
-        
-        # Detaylı hata sadece log'a
-        error_trace = traceback.format_exc()
-        logger.error(f"CRITICAL ERROR: {error_trace}")
-        
-    finally:
-        # Temizlik
-        if file_path and file_path.exists():
-            try:
-                file_path.unlink()
-                logger.info(f"Geçici dosya silindi: {file_path}")
-            except Exception as e:
-                logger.warning(f"Dosya silinemedi {file_path}: {e}")
-        await state.clear()
-"""
-
 @router.message(ProcessingStates.waiting_for_file, F.document)
 async def handle_excel_upload(message: Message, state: FSMContext):
     """
@@ -298,7 +223,17 @@ async def handle_excel_upload(message: Message, state: FSMContext):
         task_result = await _process_uploaded_file(message, file_path)
 
         if task_result["success"]:
-            report = await generate_processing_report(task_result)
+            # report = await generate_processing_report(task_result)
+            # report = generate_processing_report(task_result)
+            
+            report = generate_processing_report(
+                task_result,
+                for_internal_message=True
+            )
+                  
+                        
+            
+            
             await message.answer(report)
             logger.info("İşlem başarıyla tamamlandı")
         else:

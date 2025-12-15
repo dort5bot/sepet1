@@ -76,7 +76,7 @@ async def send_pex_mail(pex_files: List[Dict]) -> Dict:
             # 3) SERİ MAIL GÖNDERİMİ
             # -----------------------------
             try:
-                await _send_group_mail_with_files(
+                await _send_group_mail(
                     files_for_group,
                     group_info,
                     recipients
@@ -131,10 +131,11 @@ async def send_pex_mail(pex_files: List[Dict]) -> Dict:
         logger.error(f"PEX seri mail işlem hatası: {e}")
         return {"success": False, "error": str(e)}
 
+
 # PEX dosyalarını gruplara SERİ dağıtır - TEK MAIL ÇOKLU DOSYA
 # Her grup için tek mail
 # Tek mail, çoklu dosya gönderir
-async def _send_group_mail_with_files(
+async def _send_group_mail(
     file_list: List[Dict], 
     group_info: Dict, 
     recipients: List[str]
@@ -178,6 +179,26 @@ async def _send_group_mail_with_files(
         logger.error(f"❌ Grup mail hatası ({group_info.get('group_name')}): {e}")
         return False
 
+def _prepare_group_email_content(file_list: List[Dict], group_info: Dict) -> tuple:
+    """
+    Grup için email içeriğini hazırlar
+    """
+    file_types = {f['extension'] for f in file_list}
+    cities = {f['city_name'].upper() for f in file_list}
+    group_name = group_info.get("group_name", group_info.get("group_id", "Grup"))
+    
+    subject = f"📎 {group_name} - {len(file_list)} Dosya"
+    body = (
+        f"Merhaba,\n\n"
+        f"{group_name} grubu için {len(file_list)} adet dosya ektedir.\n"
+        f"Dosya türleri: {', '.join(file_types)}\n"
+        f"İlgili şehirler: {', '.join(cities)}\n"
+        f"Dosyalar: {', '.join([f['filename'] for f in file_list])}\n\n"
+        f"İyi çalışmalar,\nData_listesi_Hıdır"
+    )
+    
+    return subject, body
+
 
 async def _send_input_email(pex_files: List[Dict]) -> bool:
     """Tüm dosyaları INPUT_EMAIL'e TEK MAIL olarak gönderir (yeni sistem)"""
@@ -212,33 +233,12 @@ async def _send_input_email(pex_files: List[Dict]) -> bool:
         return False
 
 
-def _prepare_group_email_content(file_list: List[Dict], group_info: Dict) -> tuple:
-    """
-    Grup için email içeriğini hazırlar
-    """
-    file_types = {f['extension'] for f in file_list}
-    cities = {f['city_name'].upper() for f in file_list}
-    group_name = group_info.get("group_name", group_info.get("group_id", "Grup"))
-    
-    subject = f"📎 {group_name} - {len(file_list)} Dosya"
-    body = (
-        f"Merhaba,\n\n"
-        f"{group_name} grubu için {len(file_list)} adet dosya ektedir.\n"
-        f"Dosya türleri: {', '.join(file_types)}\n"
-        f"İlgili şehirler: {', '.join(cities)}\n"
-        f"Dosyalar: {', '.join([f['filename'] for f in file_list])}\n\n"
-        f"İyi çalışmalar,\nData_listesi_Hıdır"
-    )
-    
-    return subject, body
-
-
 # Gerçek mail adedi = email_results içinde her alıcı için oluşturulan satırlar
 # Başarılı mail = success=True olan satırlar
 # Başarısız mail = success=False olan satırlar
 # Input mail → ayrıca 1 adet işlem olarak eklenir
 
-async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count: int) -> str:
+async def _send_personal_email(result: Dict, input_email_sent: bool, file_count: int) -> str:
     """PEX işleme raporu oluşturur (DOĞRU MAIL SAYIMI İLE)"""
 
     # ---- 1) Genel hata kontrolü ----
@@ -283,11 +283,11 @@ async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count:
 
     # ---- 5) Rapor metni ----
     report_lines = [
-        "✅ **Pdf Excel Dağıtım Raporu**",
+        "✅ **Pdf Excel Dağıtım Raporu**\n",
         f"⏰ İşlem zamanı: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
         "",
         f"📂 Eklenen(İnput) dosya: {file_count}",
-        f"👥 İşlenen grup sayısı: {groups_processed}",
+        f"👥 Oluşan grup dosyası: {groups_processed}",
         f"📧 Başarılı mail: {successful_emails}",
         f"❌ Başarısız mail: {failed_emails}",
         f"📥 Input mail: {'✅ Gönderildi' if input_email_sent else '❌ Gönderilmedi'}",
@@ -306,6 +306,10 @@ async def _generate_pex_report(result: Dict, input_email_sent: bool, file_count:
 
     return "\n".join(report_lines)
 
+
+
+
+# ================== komut blok ==============================
 
 # PEX işlemini başlat - (RAPOR MAILI EKLENDİ)
 # Input mail → Grup mailleri  → Personal mail
@@ -335,6 +339,82 @@ async def cmd_pex(message: Message, state: FSMContext):
     )
 
 
+# 1️ İptal komutları
+# @router.message(PexProcessingStates.waiting_for_files, F.text.in_(["/dur", "/stop", "/cancel", "/iptal"]))
+@router.message(
+    PexProcessingStates.waiting_for_files,
+    Command(commands=["dur", "stop", "cancel", "iptal"])
+)
+async def handle_pex_cancel_commands(message: Message, state: FSMContext):
+    """PEX modunda iptal komutları"""
+    from handlers.reply_handler import cancel_all_operations
+    await cancel_all_operations(message, state)
+
+
+# 2️ DUR butonu
+@router.message(PexProcessingStates.waiting_for_files, F.text == "🛑 DUR")
+async def handle_pex_cancel_button(message: Message, state: FSMContext):
+    """PEX modunda DUR butonu"""
+    from handlers.reply_handler import cancel_all_operations
+    await cancel_all_operations(message, state)
+
+
+# 3️ /tamam
+# @router.message(PexProcessingStates.waiting_for_files, F.text == "/tamam")
+@router.message( PexProcessingStates.waiting_for_files,Command("tamam"))
+
+async def handle_process_pex(message: Message, state: FSMContext):
+    """PEX işlemini başlat (Aşama 1 + 2 seri, rapor bağımlı)"""
+    data = await state.get_data()
+    pex_files = data.get("pex_files", [])
+
+    if not pex_files:
+        await message.answer("❌ İşlenecek dosya yok.")
+        await state.clear()
+        return
+
+    await message.answer(
+        "⏳ PEX dağıtım işlemi başlıyor...\n"
+        "📨 Gmail uyumu: mailler *seri* gönderilir..."
+    )
+
+    try:
+        # -------------------------------
+        # AŞAMA 1 → INPUT MAIL (Seri)
+        # -------------------------------
+        input_email_sent = await _send_input_email(pex_files)
+
+        # -------------------------------
+        # AŞAMA 2 → GRUP MAILLERİ (Seri)
+        # -------------------------------
+        group_result = await send_pex_mail(pex_files)
+
+        # -------------------------------
+        # AŞAMA 3 → RAPOR
+        # -------------------------------
+        report = await _send_personal_email(group_result, input_email_sent, len(pex_files))
+        await message.answer(report)
+
+        # Kişisel e-posta gönderimi
+        if config.email.PERSONAL_EMAIL:
+            await send_email(
+                to_emails=[config.email.PERSONAL_EMAIL],
+                subject=f"📊 PEX Raporu - {len(pex_files)} Dosya",
+                # html_body=None,  # veya HTML versiyonu
+                # attachments=None,  # rapor ekli değil
+                body=report
+            )
+
+    except Exception as e:
+        logger.error(f"PEX işleme hatası: {e}")
+        await message.answer("❌ PEX işleme sırasında hata oluştu.")
+
+    finally:
+        await _cleanup_pex_files(pex_files)
+        await state.clear()
+
+
+# 4️ BELGE: belge → belge handler, hatalı belge yakalar
 @router.message(PexProcessingStates.waiting_for_files, F.document)
 async def handle_pex_file_upload(message: Message, state: FSMContext):
     """PEX dosyalarını işler"""
@@ -394,58 +474,7 @@ async def handle_pex_file_upload(message: Message, state: FSMContext):
         await message.answer("❌ Dosya işlenirken hata oluştu.")
 
 
-@router.message(PexProcessingStates.waiting_for_files, F.text == "/tamam")
-async def handle_process_pex(message: Message, state: FSMContext):
-    """PEX işlemini başlat (Aşama 1 + 2 seri, rapor bağımlı)"""
-    data = await state.get_data()
-    pex_files = data.get("pex_files", [])
-
-    if not pex_files:
-        await message.answer("❌ İşlenecek dosya yok.")
-        await state.clear()
-        return
-
-    await message.answer(
-        "⏳ PEX dağıtım işlemi başlıyor...\n"
-        "📨 Gmail uyumu için tüm mailler **seri** gönderiliyor..."
-    )
-
-    try:
-        # -------------------------------
-        # AŞAMA 1 → INPUT MAIL (Seri)
-        # -------------------------------
-        input_email_sent = await _send_input_email(pex_files)
-
-        # -------------------------------
-        # AŞAMA 2 → GRUP MAILLERİ (Seri)
-        # -------------------------------
-        group_result = await send_pex_mail(pex_files)
-
-        # -------------------------------
-        # AŞAMA 3 → RAPOR
-        # -------------------------------
-        report = await _generate_pex_report(group_result, input_email_sent, len(pex_files))
-        await message.answer(report)
-
-        # Kişisel e-posta gönderimi
-        if config.email.PERSONAL_EMAIL:
-            await send_email(
-                to_emails=[config.email.PERSONAL_EMAIL],
-                subject=f"📊 PEX Raporu - {len(pex_files)} Dosya",
-                # html_body=None,  # veya HTML versiyonu
-                # attachments=None,  # rapor ekli değil
-                body=report
-            )
-
-    except Exception as e:
-        logger.error(f"PEX işleme hatası: {e}")
-        await message.answer("❌ PEX işleme sırasında hata oluştu.")
-
-    finally:
-        await _cleanup_pex_files(pex_files)
-        await state.clear()
-
-
+# 5️ ❗ EN SON: catch-all: hata yakalama
 @router.message(PexProcessingStates.waiting_for_files)
 async def handle_wrong_pex_input(message: Message):
     """Yanlış PEX girişi - sadece dosya bekliyoruz"""
@@ -458,27 +487,24 @@ async def handle_wrong_pex_input(message: Message):
     )
 
 
-# ================== diğer komut butonları ==============================
-
-# İptal komutları ve butonları
-@router.message(PexProcessingStates.waiting_for_files, F.text.in_(["/dur", "/stop", "/cancel", "/iptal"]))
-async def handle_pex_cancel_commands(message: Message, state: FSMContext):
-    """PEX modunda iptal komutları"""
-    from handlers.reply_handler import cancel_all_operations
-    await cancel_all_operations(message, state)
-
-@router.message(PexProcessingStates.waiting_for_files, F.text == "🛑 DUR")
-async def handle_pex_cancel_button(message: Message, state: FSMContext):
-    """PEX modunda DUR butonu"""
-    from handlers.reply_handler import cancel_all_operations
-    await cancel_all_operations(message, state)
-
-
-async def _cleanup_pex_files(pex_files: List[Dict]):
-    """Geçici PEX dosyalarını temizler"""
+async def _cleanup_pex_files(pex_files: List[Dict]) -> None:
+    """
+    Geçici PEX dosyalarını güvenli şekilde temizler.
+    Python 3.11+ uyumludur.
+    """
     for file_info in pex_files:
+        path = file_info.get("path")
+
+        # Path kontrolü (defansif programlama)
+        if not isinstance(path, Path):
+            continue
+
         try:
-            file_info['path'].unlink(missing_ok=True)
-        except Exception:
-            pass
-    
+            path.unlink(missing_ok=True)
+        except PermissionError as e:
+            # Dosya kilitliyse (özellikle Windows)
+            logger.warning(f"⚠️ Dosya silinemedi (kilitli): {path} - {e}")
+        except Exception as e:
+            # Diğer beklenmeyen hatalar
+            logger.error(f"❌ Dosya silme hatası: {path} - {e}")
+

@@ -121,7 +121,7 @@ async def cancel_all_operations(message: Message, state: FSMContext, clear_files
         
         action_text = "İşlemler iptal edildi" + (" ve dosyalar temizlendi" if clear_files else "")
         await message.answer(
-            f"🛑 **{action_text}**\n\n"
+            f"❌ **{action_text}**\n\n"
             f"• Aktif durum: `{state_name}`\n"
             f"• Temizlendi: ✅\n\n"
             f"Yeni bir işlem başlatabilirsiniz.",
@@ -194,31 +194,6 @@ async def handle_json_button(message: Message, state: FSMContext) -> None:
     from handlers.json_handler import handle_json_command
     await handle_json_command(message, state)
 
-"""@router.message(lambda m: m.text and m.text == "istatistik")
-async def handle_stats_button(message: Message) -> None:
-     #istatistik butonu - sistem istatistiklerini göster
-    from handlers.admin_handler import is_admin, _show_admin_stats
-    
-    if not is_admin(message.from_user.id):
-        await message.answer("❌ Bu işlem için admin yetkisi gerekiyor.")
-        return
-    
-    await _show_admin_stats(message)
-
-@router.message(lambda m: m.text and m.text == "Admin")
-async def handle_admin_button(message: Message) -> None:
-     #Admin butonu - admin panelini açar
-    from handlers.admin_handler import is_admin, get_admin_keyboard
-    
-    if not is_admin(message.from_user.id):
-        await message.answer("❌ Bu işlem için admin yetkisi gerekiyor.")
-        return
-    
-    keyboard = get_admin_keyboard()
-    await message.answer("👑 **Admin Paneli**\n\nAşağıdaki seçeneklerden birini seçin:", reply_markup=keyboard)
-	
-# reply_handler.py - DEĞİŞİKLİK YAPILACAK KISIMLAR
-"""
 # handle_stats_button fonksiyonunu değiştir
 #  Herhangi bir kullanıcı admin paneli ve istatistiklerine erişm önlemek
 
