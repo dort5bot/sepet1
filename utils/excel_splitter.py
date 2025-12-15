@@ -65,7 +65,8 @@ class ExcelSplitter:
         self.writers: Dict[str, xlsxwriter.Workbook] = {}
         self.sheets: Dict[str, Any] = {}
         self.row_counts: Dict[str, int] = {}
-        self.matched_rows = 0
+        # self.matched_rows = 0
+        self.matched_row_ids = set()   # BENZERSİZ eşleşen satırlar
         self.unmatched_data: List[tuple] = []
         self.unmatched_cities = set()
         self._city_cache: Dict[Any, List[str]] = {}
@@ -106,7 +107,7 @@ class ExcelSplitter:
         # delegate actual write to threadpool
         await loop.run_in_executor(self._executor, functools.partial(_sync_write_row, ws, row_index, row))
         self.row_counts[group_id] += 1
-        self.matched_rows += 1
+        # self.matched_rows += 1
 
     async def _close_all_writers(self) -> Dict[str, Dict[str, Any]]:
         """Close workbooks in threadpool and return output_files dict."""
@@ -172,7 +173,7 @@ class ExcelSplitter:
                         self._city_cache[city] = []
 
             # process rows using cached lookups
-            for row in rows:
+            """for row in rows:
                 processed_rows += 1
                 # city position is expected at index 1 per earlier code
                 city = row[1] if row and len(row) > 1 else None
@@ -191,7 +192,35 @@ class ExcelSplitter:
                     if city:
                         self.unmatched_cities.add(city)
                         self.unmatched_data.append(row)
+             """
 
+            for row_idx, row in enumerate(rows):
+                processed_rows += 1
+                city = row[1] if row and len(row) > 1 else None
+                groups = []
+                if city:
+                    groups = self._city_cache.get(city, [])
+
+                has_match = False
+                if groups:
+                    for g in groups:
+                        if g != "grup_0":
+                            has_match = True
+
+                            # ✅ BENZERSİZ eşleşme burada sayılır
+                            self.matched_row_ids.add(row_idx)
+
+                            await self._ensure_group_writer(g)
+                            await self._write_row(g, row)
+
+                if not has_match:
+                    if city:
+                        self.unmatched_cities.add(city)
+                        self.unmatched_data.append(row)
+
+             
+            
+            
             logger.info(f"✔excelsplit Processing complete. Total rows processed: {processed_rows}")
 
             # finalize writers (close and gather output file info)
@@ -227,8 +256,8 @@ class ExcelSplitter:
 
             return {
                 "success": True,
-                "total_rows": processed_rows,
-                "matched_rows": self.matched_rows,
+                "processed_rows": processed_rows,              # işlenen  - eşleştirilen  Excel satırı
+                "matched_rows": len(self.matched_row_ids), # BENZERSİZ eşleşen
                 "unmatched_rows": len(self.unmatched_data),
                 "output_files": output_files,
                 "unmatched_cities": list(self.unmatched_cities),
@@ -239,10 +268,9 @@ class ExcelSplitter:
             return {
                 "success": False,
                 "error": str(e),
-                "total_rows": 0,
+                "processed_rows": 0,
                 "output_files": {},
             }
-
 
 # external API
 async def split_excel_by_groups(input_path: str, headers: List[str]) -> Dict[str, Any]:

@@ -130,43 +130,56 @@ class AsyncExcelCleaner:
             source_ws, target_ws, header_row, column_indices
         )
     
-    def _sync_copy_data_chunked(self, source_ws: Worksheet, target_ws: Worksheet, 
-                              header_row: int, column_indices: Dict[str, int]) -> int:
+    # Verileri chunk'lar halinde senkron olarak kopyalar 
+    #  Veri kaybı yapmaz
+    #  Hayalet satırları atar
+    #  Sayımı doğru yapar
+    def _sync_copy_data_chunked(
+        self,
+        source_ws: Worksheet,
+        target_ws: Worksheet,
+        header_row: int,
+        column_indices: Dict[str, int]
+    ) -> int:
         """Verileri chunk'lar halinde senkron olarak kopyalar"""
         date_idx = column_indices["TARİH"]
         city_idx = column_indices["İL"]
-        other_columns = [col for col in range(1, source_ws.max_column + 1) 
-                        if col not in [date_idx, city_idx]]
-        
-        total_rows = source_ws.max_row - header_row
+
+        other_columns = [
+            col for col in range(1, source_ws.max_column + 1)
+            if col not in (date_idx, city_idx)
+        ]
+
         new_row_idx = 2
-        
-        # Büyük dosyalar için chunk işleme
-        for chunk_start in range(header_row + 1, source_ws.max_row + 1, CHUNK_SIZE):
-            chunk_end = min(chunk_start + CHUNK_SIZE, source_ws.max_row + 1)
-            
-            for row in range(chunk_start, chunk_end):
-                # Temel sütunları kopyala
-                target_ws.cell(row=new_row_idx, column=1, 
-                              value=source_ws.cell(row=row, column=date_idx).value)
-                target_ws.cell(row=new_row_idx, column=2, 
-                              value=source_ws.cell(row=row, column=city_idx).value)
-                
-                # Diğer sütunları kopyala
-                for new_col_idx, source_col in enumerate(other_columns, 3):
-                    target_ws.cell(row=new_row_idx, column=new_col_idx,
-                                  value=source_ws.cell(row=row, column=source_col).value)
-                
-                new_row_idx += 1
-            
-            # İlerleme durumunu logla (büyük dosyalar için)
-            if total_rows > CHUNK_SIZE:
-                progress = min(100, ((chunk_start - header_row) / total_rows) * 100)
-                if progress % 25 == 0:  # Her %25'te bir log
-                    logger.info(f"Excel işleme devam ediyor: %{progress:.1f}")
-        
-        return new_row_idx - 2
-    
+        real_row_count = 0
+
+        for row in range(header_row + 1, source_ws.max_row + 1):
+
+            city_val = source_ws.cell(row=row, column=city_idx).value
+            date_val = source_ws.cell(row=row, column=date_idx).value
+
+            # 🔴 SADECE BU KONTROL
+            if city_val is None and date_val is None:
+                continue
+
+            # ✔ GERÇEK VERİ SATIRI
+            target_ws.cell(row=new_row_idx, column=1, value=date_val)
+            target_ws.cell(row=new_row_idx, column=2, value=city_val)
+
+            for new_col_idx, source_col in enumerate(other_columns, start=3):
+                target_ws.cell(
+                    row=new_row_idx,
+                    column=new_col_idx,
+                    value=source_ws.cell(row=row, column=source_col).value
+                )
+
+            new_row_idx += 1
+            real_row_count += 1
+
+        return real_row_count
+
+
+       
     async def _adjust_column_widths(self, ws: Worksheet):
         """Sütun genişliklerini asenkron olarak ayarlar"""
         loop = asyncio.get_event_loop()
@@ -176,7 +189,7 @@ class AsyncExcelCleaner:
             ws
         )
     
-    # ------ Sütun genişli -------------------------------
+    # ------ Sütun genişliği -------------------------------
     # Sabit Genişlik (En hızlısı) - 100x (1-2 ms)
     def _sync_adjust_column_widths(self, ws: Worksheet):
             fixed_width = 25  # istediğin sabit genişlik 25*0,56=14
@@ -184,7 +197,6 @@ class AsyncExcelCleaner:
                 col_letter = get_column_letter(col_idx)
                 ws.column_dimensions[col_letter].width = fixed_width
                 
-
     async def _save_workbook(self, wb: Workbook, file_path: str):
         """Workbook'u asenkron olarak kaydeder"""
         loop = asyncio.get_event_loop()

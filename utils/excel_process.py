@@ -1,23 +1,31 @@
-# utils/excel_process.py 
+# utils/excel_process.py
 """
-ZIP içinde klasör ayrımı olmadan, 
-tüm input ve output Excel dosyalarını
- aynı klasörde (düz olarak) bir arada zip yapar,
+Excel işleme ve mail gönderim modülü
 
-Amaç: Excel dosyalarını işleyip gruplara ayırır
+→  [ Excel işlemleri > paralel ]  
+→  [ MAIL işlemleri → serİ gönderİm ]
+→  [ TELEGRAM RAPORU → seri ]
+(personal, telegram rapor yapısı reporter.py içinden ayarlanır)
 
-İşlevler:
-process_excel_task(): Ana işlem akışını yönetir
-_send_group_emails(): Grup e-postalarını gönderir
-_send_bulk_email(): Toplu e-posta gönderimini başlatır
-Özellik: Excel temizleme, gruplara ayırma, mailer'ı kullanma
+- Excel işlemleri paralel çalışabilir
+- Mail gönderimi HER ZAMAN seri
+- Aynı mail yapısı tüm tiplerde kullanılır
+
+işlem sırası TÜM MAİLLER EN SON GÖNDERİLİR
+[1] Excel temizleme (seri)
+[2] Excel split (seri)
+[3] Grup mailleri (gmail seri çalışır kesinlikle paralel olmayacak)
+[4] Input mail (SERİ — grup mailleri bittikten sonra)
+[5] personal Rapor oluşturma → seri
+[6] telegram Raporu → seri
+Hiçbir mail Excel işlemleri devam ederken gönderilmez.
+SMTP bağlantısı her mailde 1 kere kullanılır aç-kapat
 
 """
 
-# excel_process.py - TAM ASYNC & TAM UYUMLU VERSİYON
 import asyncio
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import tempfile
 import zipfile
 from datetime import datetime
@@ -26,530 +34,266 @@ from config import config
 from utils.excel_cleaner import AsyncExcelCleaner
 from utils.excel_splitter import split_excel_by_groups
 from utils.reporter import generate_processing_report
-
-from utils.mailer import send_email, EmailConfig, EmailAttachment
-
+from utils.mailer import send_email
 from utils.group_manager import group_manager
 from utils.logger import logger
 
 
-# işlem sırası TÜM MAİLLER EN SON GÖNDERİLİR
-# [1] Excel temizleme (seri)
-# [2] Excel split (seri)
-# [3] Grup mailleri (gmail seri çalışır kesinlikle paralel olmayacak)
-# [4] Input mail (SERİ — grup mailleri bittikten sonra)
-# [5] personal Rapor oluşturma (SERİ)
-# [6] telegram Raporu → (İstersen seri, istersen telegram paralel)
-# Hiçbir mail Excel işlemleri devam ederken gönderilmez.
-# SMTP bağlantısı her mailde 1 kere kullanılır aç-kapat
-# EXCEL İŞLE | → | TÜM MAİLLERİ SIRAYLA GÖNDER | → | TELEGRAM RAPORU
-# Mail oluşturup sıralama bölümü > grup  > input > personal (bulk)
+# ============================================================
+# YARDIMCI – ORTAK YAPILAR
+# ============================================================
+
+def build_mail_result(
+    mail_type: str,
+    success: bool,
+    recipient=None,
+    filename=None,
+    **extra
+) -> Dict:
+    return {
+        "mail_type": mail_type,
+        "success": success,
+        "recipient": recipient,
+        "filename": filename,
+        **extra
+    }
+
+
+def calculate_mail_stats(mail_results: List[Dict]) -> Dict:
+    return {
+        "total": sum(1 for m in mail_results if m["mail_type"] in ("group", "input")),
+        "sent": sum(1 for m in mail_results if m["mail_type"] in ("group", "input") and m["success"]),
+        "failed": sum(1 for m in mail_results if m["mail_type"] in ("group", "input") and not m["success"]),
+        "by_type": {
+            "group": sum(1 for m in mail_results if m["mail_type"] == "group"),
+            "group_sent": sum(1 for m in mail_results if m["mail_type"] == "group" and m["success"]),
+            "input": sum(1 for m in mail_results if m["mail_type"] == "input"),
+            "input_sent": sum(1 for m in mail_results if m["mail_type"] == "input" and m["success"]),
+            "personal": sum(1 for m in mail_results if m["mail_type"] == "personal"),
+            "personal_sent": sum(1 for m in mail_results if m["mail_type"] == "personal" and m["success"]),
+        }
+    }
+
+
+# ============================================================
+# ANA AKIŞ
+# ============================================================
 
 async def process_excel_task(input_path: Path, user_id: int) -> Dict[str, Any]:
-    """Excel işleme görevini TAM ASYNC + TAM MAIL SIRASI ile yürütür"""
-
-    cleaning_result = None
-    temp_files_to_cleanup = []
+    mail_results: List[Dict] = []
+    temp_files: List[str] = []
 
     try:
-        logger.info(f"📊 Excel işleme başlatıldı: {input_path.name}, Kullanıcı: {user_id}")
+        logger.info(f"📊 Excel işleme başlatıldı: {input_path.name}")
 
-        # ---------------------------------------------------------------------
-        # 1) EXCEL TEMİZLEME - seri
-        # ---------------------------------------------------------------------
-        logger.info("TEMIZLEME BASLIYOR...11")
         cleaning_result = await _clean_excel_headers_async(str(input_path))
-        logger.info("TEMIZLEME BITTI-12")
-
         if not cleaning_result["success"]:
-            error_msg = f"Excel temizleme hatası: {cleaning_result.get('error')}"
-            logger.error(error_msg)
-            return {"success": False, "error": error_msg}
+            return {"success": False, "error": cleaning_result.get("error")}
 
-        temp_files_to_cleanup.append(cleaning_result["temp_path"])
-        logger.info(f"✅ Excel temizlendi: {cleaning_result['row_count']} satır")
+        temp_files.append(cleaning_result["temp_path"])
 
-
-        # ---------------------------------------------------------------------
-        # 2) EXCEL GRUPLAMA - seri
-        # ---------------------------------------------------------------------
-        logger.info("AYIRMA BASLIYOR...21")
         splitting_result = await split_excel_by_groups(
             cleaning_result["temp_path"],
             cleaning_result["headers"]
         )
-        logger.info("AYIRMA BITTI-22")
-
         if not splitting_result["success"]:
-            error_msg = f"Excel ayırma hatası: {splitting_result.get('error')}"
-            logger.error(error_msg)
-            return {"success": False, "error": error_msg}
+            return {"success": False, "error": splitting_result.get("error")}
 
         output_files = splitting_result["output_files"]
-        logger.info(f"✅ Excel gruplara ayrıldı: {splitting_result['total_rows']} satır, {len(output_files)} grup")
 
+        mail_results.extend(await _send_group_emails(output_files))
+        mail_results.extend(await send_input_only_email(input_path))
 
-        # ---------------------------------------------------------------------
-        # 3) TÜM MAİLLER BU AŞAMADAN SONRA SIRAYLA GİDECEK
-        # ---------------------------------------------------------------------
-
-        mail_results = {
-            "group_mails": {}
-            # "input_mail": None,
-            # "personal_mail": None
-        }
-
-        # ************************************************************
-        # 3.1 GRUP MAİLLERİ (N adet) - paralel değil - SERİ
-        # ************************************************************
-        logger.info("📧 GRUP MAİLLERİ GÖNDERİLİYOR... (1/3)")
-        group_results = await _send_group_emails(output_files)
-        mail_results["group_mails"] = group_results
-
-
-        # ************************************************************
-        # 3.2 INPUT MAIL - seri
-        # ************************************************************
-        logger.info("📧 INPUT MAIL GÖNDERİLİYOR... (2/3)")
-        mail_results["input_mail"] = await send_input_only_email(input_path)
-        #MAİLİ GÖRMEK İSTERSEN 
-        mail_results["input_email_recipient"] = getattr(config.email, "INPUT_EMAIL", None)
-
-
-
-        # ************************************************************
-        # 3.3 KİŞİSEL MAIL (ZIP + RAPOR) – EN SON - seri
-        # ************************************************************
-        logger.info("📧 KİŞİSEL SON RAPOR MAILİ GÖNDERİLİYOR... (3/3)")
-        mail_results["personal_mail"] = await _send_bulk_email(
-            input_path,
-            output_files,
-            {
-                "success": True,
-                "output_files": output_files,
-                "total_rows": splitting_result["total_rows"],
-                "matched_rows": splitting_result["matched_rows"],
-                "unmatched_cities": splitting_result.get("unmatched_cities", []),
-                #"group_emails": group_results,
-                "email_results": group_results,
-                "input_email_sent": mail_results["input_mail"],
-            }
-        )
-        #mail adresini görmek İstersen 
-        mail_results["bulk_email_recipient"] = getattr(config.email, "PERSONAL_EMAIL", None)
-
-
-
-        # ---------------------------------------------------------------------
-        # 4) TELEGRAM RAPORU
-        # ---------------------------------------------------------------------
-        final_result = {
+        processing_context = {
             "success": True,
             "output_files": output_files,
-            "total_rows": splitting_result["total_rows"],
+            "total_rows": cleaning_result["row_count"],
+            "processed_rows": splitting_result["processed_rows"],
             "matched_rows": splitting_result["matched_rows"],
             "unmatched_cities": splitting_result.get("unmatched_cities", []),
-            "stats": splitting_result.get("stats", {}),
             "mail_results": mail_results,
-            "user_id": user_id,
-            
-            "input_email_recipient": mail_results["input_email_recipient"],
-            "bulk_email_recipient": mail_results["bulk_email_recipient"],
-           
-            "email_results": group_results,  # _send_group_emails'dan gelen sonuçları direkt kullanın
-            "input_email_sent": mail_results.get("input_mail", False),  # .get ile güvenli erişim
-            "bulk_email_sent": mail_results.get("personal_mail", False),  # .get ile güvenli erişim
-
-    
-            # # ✅ YENİ EKLENEN ALANLAR:
-            # "email_results": mail_results["group_mails"],  # Grup mail sonuçları
-            # "input_email_sent": mail_results["input_mail"],  # Input mail durumu
-            # "bulk_email_sent": mail_results["personal_mail"],  # Toplu mail durumu
-
+            "mail_stats": calculate_mail_stats(mail_results),
+            "input_filename": input_path.name,  # ✅ Doğrudan burada ekliyoruz
         }
 
-        telegram_report = await generate_processing_report(final_result, "telegram")
-        logger.info(f"📱 Telegram raporu hazır: {len(telegram_report)} karakter")
+        mail_results.extend(
+            await _send_personal_email(input_path, output_files, processing_context)
+        )
 
-        return final_result
+        processing_context["mail_results"] = mail_results
+        processing_context["mail_stats"] = calculate_mail_stats(mail_results)
+
+        return processing_context
+
 
     except Exception as e:
-        logger.error(f"❌ İşlem görevi hatası: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
+        logger.error(f"❌ İşlem hatası: {e}", exc_info=True)
+        mail_results.append(build_mail_result("system", False, error=str(e)))
+        return {"success": False, "error": str(e), "mail_results": mail_results}
 
     finally:
-        await _cleanup_temp_files(temp_files_to_cleanup)
+        await _cleanup_temp_files(temp_files)
 
+
+# ============================================================
+# EXCEL
+# ============================================================
 
 async def _clean_excel_headers_async(input_path: str) -> Dict[str, Any]:
-    """Excel temizleme işlemini TAM ASYNC olarak yürütür"""
     try:
         cleaner = AsyncExcelCleaner()
-        result = await cleaner.clean_excel_headers(input_path)
-        return result
+        return await cleaner.clean_excel_headers(input_path)
     except Exception as e:
-        logger.error(f"❌ Async Excel temizleme hatası: {e}")
+        logger.error(f"❌ Excel temizleme hatası: {e}")
         return {"success": False, "error": str(e)}
 
-# ---------------------
-# Mail gönderim bölümü > grup  > input > personal (bulk)
-# ---------------------
+
+# ============================================================
+# MAIL – GROUP
+# ============================================================
+
 async def _send_group_emails(output_files: Dict) -> List[Dict]:
-    """
-    Gmail ile %100 uyumlu mail gönderim yapısı.
-    - Paralel görev yok
-    - Tüm mailler sırayla ve güvenli aralıklarla gönderilir (seri mail)
-    - Bağlan → Gönder → Kapat → Bekle → Tekrar gönder
-    - Task listesi oluşturuluyor ama paralel çalıştırılmaz
-    - Her gönderim arasında bekleme -> Gmail throttle önler
-    
-    """
-    email_results = []
+    await group_manager._ensure_initialized()
+    mail_queue: List[Dict] = []
+    results: List[Dict] = []
 
-    try:
-        await group_manager._ensure_initialized()
+    for group_id, file_info in output_files.items():
+        if file_info["row_count"] <= 0:
+            continue
 
-        # ---------------------------------------------
-        # 1) MAIL GÖREV LİSTESİ OLUŞTUR
-        # ---------------------------------------------
-        prepared_tasks = []
+        group_info = await group_manager.get_group_info(group_id)
+        recipients = [r.strip() for r in group_info.get("email_recipients", []) if r]
 
-        for group_id, file_info in output_files.items():
-            if file_info["row_count"] <= 0:
-                logger.warning(f"📭 Boş dosya atlandı: {group_id}")
-                continue
-
-            group_info = await group_manager.get_group_info(group_id)
-            recipients = group_info.get("email_recipients", [])
-
-            if not recipients:
-                logger.warning(f"📭 Alıcı bulunamadı: {group_id}")
-                continue
-
-            valid_recipients = [
-                r.strip() for r in recipients
-                if r and r.strip()
-            ]
-
-            if not valid_recipients:
-                logger.warning(f"📭 Geçerli alıcı yok: {group_id}")
-                continue
-
-            subject = f"{group_info.get('group_name', group_id)} - {file_info['filename']}"
-            body = (
-                f"Merhaba,\n\n"
-                f"{group_info.get('group_name', group_id)} grubu için {file_info['row_count']} satırlık rapor ekte gönderilmiştir.\n\n"
-                f"İyi çalışmalar,\nData_listesi_Hıdır"
-            )
-
-            # HER RECIPIENT İÇİN GÖREV
-            for r in valid_recipients:
-                prepared_tasks.append({
-                    "group_id": group_id,
-                    "recipient": r,
-                    "filename": file_info["path"].name,
-                    "subject": subject,
-                    "body": body,
-                    "attachment": file_info["path"]
-                })
-
-        if not prepared_tasks:
-            logger.info("📭 Gönderilecek mail yok")
-            return []
-
-        logger.info(f"📧 Gmail uyumlu mod: {len(prepared_tasks)} mail planlandı")
-
-        # ---------------------------------------------
-        # 2) GMAİL UYUMLU SERİ MAİL GÖNDERİM
-        # ---------------------------------------------
-        for task in prepared_tasks:
-
-            # Mail gönder
-            result = await send_email(
-                to_emails=[task["recipient"]],
-                subject=task["subject"],
-                body=task["body"],
-                attachments=[task["attachment"]]
-            )
-
-            # Sonuç işle
-            if result.get("success"):
-                logger.info(
-                    f"✅ Gönderildi -> Grup:{task['group_id']} / "
-                    f"{task['recipient']} / {task['filename']}"
-                )
-                email_results.append({
-                    "success": True,
-                    "group_id": task["group_id"],
-                    "recipient": task["recipient"],
-                    "filename": task["filename"],
-                    "port_used": result.get("port_used")
-                })
-            else:
-                logger.error(
-                    f"❌ Gönderilemedi -> Grup:{task['group_id']} / "
-                    f"{task['recipient']} / {task['filename']} / Hata:{result.get('error')}"
-                )
-                email_results.append({
-                    "success": False,
-                    "group_id": task["group_id"],
-                    "recipient": task["recipient"],
-                    "filename": task["filename"],
-                    "error": result.get("error")
-                })
-
-            # ---------------------------------------------
-            # GMAİL TİTİZ NOKTA: her mail arası delay
-            # ---------------------------------------------
-            await asyncio.sleep(1.2)  # Gmail için altın değerinde
-
-        # ---------------------------------------------
-        # 3) İSTATİSTİK
-        # ---------------------------------------------
-        ok = sum(1 for r in email_results if r["success"])
-        logger.info(f"📊 Gmail-Mode: {ok}/{len(email_results)} mail başarıyla gönderildi")
-
-        return email_results
-
-    except Exception as e:
-        logger.error(f"❌ Critical Mail Error: {e}", exc_info=True)
-        return [{"success": False, "error": str(e)}]
-
-
-async def send_input_only_email(input_path: Path, max_retries: int = 2) -> bool:
-    """Input dosyasını mail olarak gönder"""
-    try:
-        input_email = getattr(config.email, 'INPUT_EMAIL', None)
-        if not input_email:
-            logger.info("📭 INPUT_EMAIL tanımlı değil, input mail atlanıyor")
-            return False
-        if not input_path or not input_path.exists():
-            logger.error(f"❌ Input dosyası bulunamadı: {input_path}")
-            return False
-
-        subject = f"📥 Teldata Input excel - {input_path.name}"
-        body = (f"Merhaba,\n\nTelefon data dosyası ektedir.\n"
-                f"Dosya: {input_path.name}\n\nİyi çalışmalar,\nData_listesi_Hıdır")
-        
-        # send_email fonksiyonunu kullan
-        result = await send_email(
-            to_emails=[input_email],
-            subject=subject,
-            body=body,
-            attachments=[input_path]
+        subject = f"{group_info.get('group_name', group_id)} - {file_info['filename']}"
+        body = (
+            f"Merhaba,\n\n"
+            f"{group_info.get('group_name', group_id)} grubu için "
+            f"{file_info['row_count']} satırlık rapor ekte gönderilmiştir.\n\n"
+            f"İyi çalışmalar,\nData_listesi_Hıdır"
         )
-        
-        return bool(result and result.get("success"))
-        
-    except Exception as e:
-        logger.error(f"❌ Input mail gönderim hatası: {e}")
-        return False
 
+        for r in recipients:
+            mail_queue.append({
+                "recipient": r,
+                "group_id": group_id,
+                "filename": file_info["path"].name,
+                "subject": subject,
+                "body": body,
+                "attachment": file_info["path"]
+            })
 
-async def _send_bulk_email(input_path: Path, output_files: Dict, processing_result: Dict) -> bool:
-    """Toplu mail gönderimini TAM ASYNC olarak yönetir"""
-    try:
-        if not config.email.PERSONAL_EMAIL:
-            logger.error("❌ PERSONAL_EMAIL tanımlı değil")
-            return False
-            
-        logger.info(f"📦 Toplu mail hazırlanıyor: {len(output_files)} dosya")
-        
-        # ZIP dosyasını oluştur
-        # ---------------------------------------------
-        zip_path = await create_backup_zip(input_path, output_files)
-        if not zip_path:
-            return False
-            
-        # Rapor metnini hazırla
-        # ---------------------------------------------
-        report_text = await generate_processing_report(processing_result, "mail")
-        
-        # send_email fonksiyonunu kullan
+    for mail in mail_queue:
         result = await send_email(
-            to_emails=[config.email.PERSONAL_EMAIL],
-            # subject=f"📦 Excel Data Raporu - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-            # subject = f"{group_info.get('group_name', group_id)} - {file_info['filename']}"
-            subject=f"📦 Excel Data Raporu - {input_path.name}",
-            
-            body=f"Merhaba,\n\n{report_text}\n\nİyi çalışmalar,\nData_listesi_Hıdır",
-            attachments=[zip_path]
+            to_emails=[mail["recipient"]],
+            subject=mail["subject"],
+            body=mail["body"],
+            attachments=[mail["attachment"]]
         )
-        
-        # ZIP dosyasını temizle
-        # ---------------------------------------------
+
+        results.append(
+            build_mail_result(
+                "group",
+                bool(result and result.get("success")),
+                recipient=mail["recipient"],
+                filename=mail["filename"],
+                error=result.get("error") if result else None
+            )
+        )
+
+        await asyncio.sleep(1.2)
+
+    return results
+
+
+# ============================================================
+# MAIL – INPUT
+# ============================================================
+
+async def send_input_only_email(input_path: Path) -> List[Dict]:
+    email = getattr(config.email, "INPUT_EMAIL", None)
+    if not email or not input_path.exists():
+        return [build_mail_result("input", False, error="Input mail yapılandırılamadı")]
+
+    result = await send_email(
+        to_emails=[email],
+        subject=f"📥 Teldata Input excel - {input_path.name}",
+        body="Merhaba,\n\nTelefon data dosyası ektedir.\n\nİyi çalışmalar,\nData_listesi_Hıdır",
+        attachments=[input_path]
+    )
+
+
+    return [
+        build_mail_result(
+            "input",
+            bool(result and result.get("success")),
+            recipient=email,
+            filename=input_path.name,
+            error=result.get("error") if result else None
+        )
+    ]
+
+
+# ============================================================
+# MAIL – PERSONAL
+# ============================================================
+
+async def _send_personal_email(
+    input_path: Path,
+    output_files: Dict,
+    processing_result: Dict
+) -> List[Dict]:
+
+    email = config.email.PERSONAL_EMAIL
+    if not email:
+        return [build_mail_result("personal", False, error="PERSONAL_EMAIL yok")]
+
+    zip_path = await create_backup_zip(input_path, output_files)
+    # report_text = generate_processing_report(processing_result, "mail")
+
+    report_text = generate_processing_report(processing_result)
+
+
+    result = await send_email(
+        to_emails=[email],
+        subject=f"📦 Excel Data Raporu - {input_path.name}",
+        body=f"Merhaba,\n\n{report_text}\n\nİyi çalışmalar,\nData_listesi_Hıdır",
+        attachments=[zip_path]
+    )
+
+    return [
+        build_mail_result(
+            "personal",
+            bool(result and result.get("success")),
+            recipient=email,
+            filename=zip_path.name if zip_path else None,
+            error=result.get("error") if result else None
+        )
+    ]
+
+
+# ============================================================
+# TEMİZLİK & ZIP
+# ============================================================
+
+async def _cleanup_temp_files(files: List[str]):
+    for f in files:
         try:
-            if zip_path.exists():
-                zip_path.unlink()
-                logger.info(f"🗑️ Geçici ZIP dosyası silindi: {zip_path}")
+            Path(f).unlink(missing_ok=True)
         except Exception as e:
-            logger.warning(f"⚠️ ZIP dosyası silinemedi: {e}")
-        
-        if result and result.get("success"):
-            logger.info(f"✅ Toplu mail gönderildi: {config.email.PERSONAL_EMAIL}")
-            return True
-        else:
-            logger.error(f"❌ Toplu mail gönderilemedi: {config.email.PERSONAL_EMAIL}")
-            return False
-            
-    except Exception as e:
-        logger.error(f"❌ Toplu mail hatası: {e}", exc_info=True)
-        return False
-
-
-
-
-async def _cleanup_temp_files(temp_files: List[str]):
-    """Geçici dosyaları TAM ASYNC olarak temizler"""
-    if not temp_files:
-        return
-        
-    cleanup_tasks = []
-    
-    for temp_file in temp_files:
-        try:
-            temp_path = Path(temp_file)
-            if temp_path.exists():
-                # Dosya silme işlemini async yap
-                def sync_delete():
-                    try:
-                        temp_path.unlink()
-                        return True
-                    except Exception as e:
-                        logger.warning(f"⚠️ Geçici dosya silinemedi {temp_file}: {e}")
-                        return False
-                
-                loop = asyncio.get_event_loop()
-                task = loop.run_in_executor(None, sync_delete)
-                cleanup_tasks.append((task, temp_path.name))
-                
-        except Exception as e:
-            logger.warning(f"⚠️ Geçici dosya temizleme hatası {temp_file}: {e}")
-    
-    if cleanup_tasks:
-        # Tüm silme işlemlerini bekleyerek paralel çalıştır
-        tasks = [task[0] for task in cleanup_tasks]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Sonuçları logla
-        for i, result in enumerate(results):
-            filename = cleanup_tasks[i][1]
-            if isinstance(result, Exception) or result is False:
-                logger.warning(f"⚠️ Geçici dosya silinemedi: {filename}")
-            else:
-                logger.info(f"🗑️ Geçici dosya silindi: {filename}")
-
-
-async def process_multiple_excel_files(file_paths: List[Path], user_id: int) -> Dict[str, Any]:
-    """
-    Birden fazla Excel dosyasını TAM ASYNC olarak işler
-    
-    Args:
-        file_paths: İşlenecek Excel dosya yolları listesi
-        user_id: Kullanıcı ID'si
-        
-    Returns:
-        Toplu işlem sonuçları
-    """
-    try:
-        if not file_paths:
-            return {"success": False, "error": "Dosya listesi boş"}
-        
-        logger.info(f"🔄 Toplu Excel işleme başlatıldı: {len(file_paths)} dosya")
-        
-        # Tüm dosyaları paralel işle
-        tasks = [process_excel_task(file_path, user_id) for file_path in file_paths]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Sonuçları analiz et
-        successful = []
-        failed = []
-        total_rows = 0
-        total_emails = 0
-        
-        for i, result in enumerate(results):
-            file_path = file_paths[i]
-            
-            if isinstance(result, Exception):
-                failed.append({
-                    "file": file_path.name,
-                    "error": str(result)
-                })
-                continue
-                
-            if result.get("success"):
-                successful.append({
-                    "file": file_path.name,
-                    "output_files": len(result.get("output_files", {})),
-                    "total_rows": result.get("total_rows", 0),
-                    "emails_sent": len([r for r in result.get("email_results", []) if r.get("success")])
-                })
-                total_rows += result.get("total_rows", 0)
-                total_emails += len([r for r in result.get("email_results", []) if r.get("success")])
-            else:
-                failed.append({
-                    "file": file_path.name,
-                    "error": result.get("error", "Bilinmeyen hata")
-                })
-        
-        return {
-            "success": True,
-            "total_files": len(file_paths),
-            "successful_files": len(successful),
-            "failed_files": len(failed),
-            "total_rows_processed": total_rows,
-            "total_emails_sent": total_emails,
-            "successful": successful,
-            "failed": failed,
-            "success_rate": (len(successful) / len(file_paths)) * 100 if file_paths else 0
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Toplu Excel işleme hatası: {e}", exc_info=True)
-        return {
-            "success": False,
-            "error": str(e),
-            "total_files": len(file_paths),
-            "successful_files": 0,
-            "failed_files": len(file_paths)
-        }
+            logger.warning(f"⚠️ Temp silinemedi: {e}")
 
 
 async def create_backup_zip(input_path: Path, output_files: Dict) -> Path:
-    """
-    Input ve output dosyalarını TAM ASYNC olarak ZIP'ler
-    
-    Args:
-        input_path: Orijinal input dosyası
-        output_files: Oluşturulan output dosyaları
-        
-    Returns:
-        ZIP dosyasının yolu
-    """
-    try:
-        zip_path = Path(tempfile.gettempdir()) / f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
-        
-        def sync_create_zip():
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                # Input dosyasını ekle
-                if input_path.exists():
-                    zipf.write(input_path, input_path.name)
-                
-                # Output dosyalarını ekle
-                for group_id, file_info in output_files.items():
-                    if file_info["path"].exists():
-                        zipf.write(file_info["path"], file_info["filename"])
-            
-            return zip_path
-        
-        # ZIP oluşturma işlemini async yap
-        loop = asyncio.get_event_loop()
-        result_path = await loop.run_in_executor(None, sync_create_zip)
-        
-        logger.info(f"✅ Backup ZIP oluşturuldu: {result_path}")
-        return result_path
-        
-    except Exception as e:
-        logger.error(f"❌ Backup ZIP oluşturma hatası: {e}")
-        return None
-        
+    zip_path = Path(tempfile.gettempdir()) / f"excel_{datetime.now():%Y%m%d_%H%M%S}.zip"
+
+    def sync_zip():
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+            if input_path.exists():
+                z.write(input_path, input_path.name)
+            for f in output_files.values():
+                if f["path"].exists():
+                    z.write(f["path"], f["filename"])
+        return zip_path
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, sync_zip)
