@@ -307,8 +307,6 @@ async def _send_personal_email(result: Dict, input_email_sent: bool, file_count:
     return "\n".join(report_lines)
 
 
-
-
 # ================== komut blok ==============================
 
 # PEX işlemini başlat - (RAPOR MAILI EKLENDİ)
@@ -341,28 +339,15 @@ async def cmd_pex(message: Message, state: FSMContext):
 
 # 1️ İptal komutları
 # @router.message(PexProcessingStates.waiting_for_files, F.text.in_(["/dur", "/stop", "/cancel", "/iptal"]))
-@router.message(
-    PexProcessingStates.waiting_for_files,
-    Command(commands=["dur", "stop", "cancel", "iptal"])
-)
+@router.message(PexProcessingStates.waiting_for_files,Command(commands=["dur", "stop", "cancel", "iptal"]))
 async def handle_pex_cancel_commands(message: Message, state: FSMContext):
     """PEX modunda iptal komutları"""
     from handlers.reply_handler import cancel_all_operations
     await cancel_all_operations(message, state)
 
 
-# 2️ DUR butonu
-@router.message(PexProcessingStates.waiting_for_files, F.text == "🛑 DUR")
-async def handle_pex_cancel_button(message: Message, state: FSMContext):
-    """PEX modunda DUR butonu"""
-    from handlers.reply_handler import cancel_all_operations
-    await cancel_all_operations(message, state)
-
-
-# 3️ /tamam
-# @router.message(PexProcessingStates.waiting_for_files, F.text == "/tamam")
+# 2 /tamam
 @router.message( PexProcessingStates.waiting_for_files,Command("tamam"))
-
 async def handle_process_pex(message: Message, state: FSMContext):
     """PEX işlemini başlat (Aşama 1 + 2 seri, rapor bağımlı)"""
     data = await state.get_data()
@@ -414,7 +399,7 @@ async def handle_process_pex(message: Message, state: FSMContext):
         await state.clear()
 
 
-# 4️ BELGE: belge → belge handler, hatalı belge yakalar
+# 3 BELGE: belge → belge handler, hatalı belge yakalar
 @router.message(PexProcessingStates.waiting_for_files, F.document)
 async def handle_pex_file_upload(message: Message, state: FSMContext):
     """PEX dosyalarını işler"""
@@ -473,6 +458,16 @@ async def handle_pex_file_upload(message: Message, state: FSMContext):
         logger.error(f"PEX dosya işleme hatası: {e}")
         await message.answer("❌ Dosya işlenirken hata oluştu.")
 
+
+
+# 4️ 🛑 DUR BUTONU İÇİN ÖZEL HANDLER (BURAYA EKLEYİN)
+@router.message(PexProcessingStates.waiting_for_files, F.text == "🛑 DUR")
+async def handle_pex_dur_button(message: Message, state: FSMContext):
+    """PEX modunda DUR butonu"""
+    from handlers.reply_handler import cancel_all_operations
+    await cancel_all_operations(message, state, clear_files=True)
+    
+    
 
 # 5️ ❗ EN SON: catch-all: hata yakalama
 @router.message(PexProcessingStates.waiting_for_files)

@@ -44,7 +44,7 @@ class ReplyKeyboardManager:
             keyboard=[
                 [
                     KeyboardButton(text="oku"), 
-                    KeyboardButton(text="Temizle"), 
+                    KeyboardButton(text="Blok"),  # YENİ
                     KeyboardButton(text="Kova"), 
                     KeyboardButton(text="PEX")
                 ],
@@ -104,21 +104,49 @@ async def _send_welcome_message(message: Message) -> None:
 # ---------------------------------------------------
 # MERKEZİ İPTAL FONKSİYONU - TÜM HANDLER'LAR İÇİN - 'ptal eder- temizler
 # ---------------------------------------------------
+# 🎯 Amaç:
+# Kova’ya girdim → vazgeçtim → iptal → PEX başlasın
 
-async def cancel_all_operations(message: Message, state: FSMContext, clear_files: bool = False) -> None:
+"""
+Kova’ya girdim → vazgeçtim → iptal → PEX başlasın
+Yani:
+Kova state’i tam temizlenecek
+Dosyalar temizlenecek
+FSM tamamen sıfırlanacak
+Sonrasında PEX’e girince eski state’den EN UFACIK iz kalmayacak
+
+
+Tüm aktif işlemleri ve state'leri temizle
+Tüm handler'lar için ortak iptal fonksiyonu
+
+Args:
+clear_files: Dosyaları da temizle (🛑 DUR için True)
+"""
+
+
+async def cancel_all_operations(
+    message: Message,
+    state: FSMContext,
+    clear_files: bool = False
+) -> None:
     """
     Tüm aktif işlemleri ve state'leri temizle
     Tüm handler'lar için ortak iptal fonksiyonu
-    
-    Args:
-        clear_files: Dosyaları da temizle (🛑 DUR için True)
     """
     current_state = await state.get_state()
-    
+
+    # 1️⃣ DOSYALARI TEMİZLE (state varken!)
+    if clear_files:
+        from handlers.file_handler import clear_all
+        await clear_all(message)
+
+    # 2️⃣ FSM KAPAT
     if current_state:
         state_name = current_state.split(":")[-1] if ":" in current_state else current_state
+
         await state.clear()
-        
+        await state.set_data({})  # 🔥 KRİTİK SATIR (TAM BURASI)
+
         action_text = "İşlemler iptal edildi" + (" ve dosyalar temizlendi" if clear_files else "")
         await message.answer(
             f"❌ **{action_text}**\n\n"
@@ -128,17 +156,17 @@ async def cancel_all_operations(message: Message, state: FSMContext, clear_files
             reply_markup=ReplyKeyboardManager.get_keyboard()
         )
     else:
+        # state yoksa bile ZORLA sıfırla (defansif)
+        await state.set_data({})  # 🔒 EMNİYET KEMERİ
+
         action_text = "Zaten aktif işlem yok" + (" ve dosyalar temizlendi" if clear_files else "")
         await message.answer(
             f"✅ {action_text}.\n"
             f"Yeni işlem başlatmak için menüyü kullanın.",
             reply_markup=ReplyKeyboardManager.get_keyboard()
         )
-    
-    # Dosya temizleme gerekiyorsa
-    if clear_files:
-        from handlers.file_handler import clear_all
-        await clear_all(message)
+
+
 
 # ---------------------------------------------------
 # KOMUT HANDLER'LARI
@@ -163,18 +191,23 @@ async def cmd_reply_keyboard(message: Message) -> None:
 async def handle_oku_button(message: Message) -> None:
     """oku butonu - hoşgeldin mesajı"""
     await _send_welcome_message(message)
-
-@router.message(lambda m: m.text and m.text == "Temizle")
-async def handle_clear_button(message: Message) -> None:
-    """Temizle butonu - sadece dosya temizliği"""
-    from handlers.file_handler import clear_all
-    await message.answer("🧹 Sadece dosya temizliği yapıldı...")
-    await clear_all(message)
-
+    
+# 🧹 Sadece dosya temizliği yapıldı
 @router.message(lambda m: m.text and m.text == "🛑 DUR")
 async def handle_stop_button(message: Message, state: FSMContext) -> None:
-    """🛑 DUR butonu - tüm işlemleri iptal et + dosyaları temizle"""
+    """TEST: 🛑 DUR butonu"""
+    current_state = await state.get_state()
     await cancel_all_operations(message, state, clear_files=True)
+    
+   
+
+   
+
+@router.message(lambda m: m.text and m.text == "Blok")
+async def handle_block_button(message: Message, state: FSMContext):
+    """Blok butonu"""
+    from handlers.block_handler import cmd_block
+    await cmd_block(message, state)
 
 @router.message(lambda m: m.text and m.text == "Kova")
 async def handle_kova_button(message: Message, state: FSMContext) -> None:
@@ -182,11 +215,13 @@ async def handle_kova_button(message: Message, state: FSMContext) -> None:
     from handlers.kova_handler import cmd_process
     await cmd_process(message, state)
 
+
 @router.message(lambda m: m.text and m.text == "PEX")
 async def handle_pex_button(message: Message, state: FSMContext) -> None:
     """PEX butonu - dosya dağıtımı"""
     from handlers.pex_handler import cmd_pex
     await cmd_pex(message, state)
+
 
 @router.message(lambda m: m.text and m.text == "Js")
 async def handle_json_button(message: Message, state: FSMContext) -> None:
@@ -202,19 +237,20 @@ async def handle_stats_button(message: Message) -> None:
     """istatistik butonu - sistem istatistiklerini göster"""
     from handlers.admin_handler import is_admin
     
-    if not is_admin(message.from_user.id):  # ✅ BU SATIRI EKLEndi
+    if not is_admin(message.from_user.id): 
         await message.answer("❌ Bu işlem için admin yetkisi gerekiyor.")
         return
     
     from handlers.admin_handler import _show_admin_stats
     await _show_admin_stats(message)
 
+
 @router.message(lambda m: m.text and m.text == "Admin")
 async def handle_admin_button(message: Message) -> None:
     """Admin butonu - admin panelini açar"""
     from handlers.admin_handler import is_admin
     
-    if not is_admin(message.from_user.id):  # ✅ BU SATIRI EKLEndi
+    if not is_admin(message.from_user.id):
         await message.answer("❌ Bu işlem için admin yetkisi gerekiyor.")
         return
     
