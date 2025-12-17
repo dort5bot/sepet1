@@ -38,6 +38,9 @@ Grup / input / bulk için ayrımı handler yapar
 20+ mail arka arkaya sorunsuz gönderir
 Grupta 18 mail + input + bulk → 0 hata
 
+
+KESİN MAİL SAYMA İŞİ mailer.py içinde OLMAMALI
+
 """
 
 # utils/mailer21.py
@@ -350,6 +353,7 @@ class EmailHandler:
     
     def __init__(self, config: Optional[EmailConfig] = None):
         self.config = config or EmailConfig()
+        
         self.sent_count = 0
         self.failed_count = 0
     

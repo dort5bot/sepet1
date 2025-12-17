@@ -30,6 +30,16 @@ class InterceptHandler(logging.Handler):
         )
 
 
+# utils/logger.py'de console log seviyesini değiştir: seviyesini DEBUG'a çıkar:
+logger.add(
+    lambda msg: print(msg, end=""),
+    level="DEBUG",  # INFO yerine DEBUG
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    colorize=True
+)
+
+
+
 def setup_logger():
     """Async uyumlu logger kurulumu"""
     
