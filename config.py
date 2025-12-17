@@ -84,9 +84,17 @@ class PathConfig:
         self.OUTPUT_DIR = self.DATA_DIR / "output" 
         self.GROUPS_DIR = self.DATA_DIR / "groups"
         self.LOGS_DIR = self.DATA_DIR / "logs"
+        self.TEMP_DIR = self.DATA_DIR / "temp"
         
-        for directory in [self.INPUT_DIR, self.OUTPUT_DIR, self.GROUPS_DIR, self.LOGS_DIR]:
+        # for directory in [self.INPUT_DIR, self.OUTPUT_DIR, self.GROUPS_DIR, self.LOGS_DIR]:
+            # directory.mkdir(parents=True, exist_ok=True)
+
+        for directory in [self.INPUT_DIR,
+            self.OUTPUT_DIR,self.GROUPS_DIR,
+            self.LOGS_DIR,self.TEMP_DIR,
+        ]:
             directory.mkdir(parents=True, exist_ok=True)
+
 
 @dataclass
 class BotConfig:
