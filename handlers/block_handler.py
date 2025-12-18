@@ -166,7 +166,7 @@ async def handle_data_excel(message: Message, state: FSMContext):
             "success": True,
             "output_files": splitting["output_files"],
             "mail_results": mail_results,
-            "mail_stats": calculate_mail_stats(mail_results),  # ✅ mail_stats ekle
+            "mail_stats": calculate_mail_stats(mail_results),
             "input_filename": message.document.file_name,
             "total_rows": cleaning.get("row_count", 0),
             "matched_rows": splitting.get("matched_rows", 0),
@@ -193,102 +193,6 @@ async def handle_data_excel(message: Message, state: FSMContext):
 
 
 # ===================== MAIL =====================
-
- 
-# 3 
-"""async def _send_block_emails(output_files: Dict) -> List[Dict]:
-    results = []
-    
-    # INPUT_EMAIL için tüm dosya bilgilerini topla
-    input_email = config.email.INPUT_EMAIL
-    all_files_for_input = []  # (file_path, row_count, cities) tuple listesi
-    
-    for group_id, file_info in output_files.items():
-        if file_info["row_count"] <= 0:
-            continue
-
-        # 1) Gruplara mail gönder
-        group_info = await group_manager.get_group_info(group_id)
-        recipients = [r for r in group_info.get("email_recipients", []) if r]
-
-        subject = f"{group_info.get('group_name', group_id)} - Blok Veriler"
-        body = (
-            f"Merhaba,\n\n"
-            f"{file_info['row_count']} satırlık blok veriler ekte gönderilmiştir.\n"
-            f"Şehirler: {', '.join(file_info.get('cities', []))}\n\n"
-            f"İyi çalışmalar."
-        )
-
-        for recipient in recipients:
-            result = await send_email(
-                to_emails=[recipient],
-                subject=subject,
-                body=body,
-                attachments=[file_info["path"]]
-            )
-
-            results.append({
-                "recipient": recipient,
-                "success": bool(result and result.get("success")),
-                "filename": file_info["filename"]
-            })
-
-            await asyncio.sleep(1.2)
-        
-        # INPUT_EMAIL için dosya bilgilerini topla
-        all_files_for_input.append({
-            "path": file_info["path"],
-            "row_count": file_info["row_count"],
-            "cities": file_info.get("cities", []),
-            "filename": file_info["filename"],
-            "group_id": group_id
-        })
-    
-    # 2) INPUT_EMAIL'e TÜM dosyaları tek mailde gönder
-    if input_email and all_files_for_input:
-        input_subject = f"📥 BLOK İŞLEMİ TÜM ÇIKTILAR - "
-        input_body = (
-            f"Merhaba,\n\n"
-            f"Blok işlemi tamamlandı. Tüm çıktı dosyaları bu mailin ekinde gönderilmiştir.\n\n"
-            f"Toplam {len(all_files_for_input)} adet Excel dosyası:\n"
-        )
-        
-        # Dosya listesini oluştur
-        total_rows = 0
-        for i, file_data in enumerate(all_files_for_input, 1):
-            row_count = file_data["row_count"]
-            cities = file_data["cities"]
-            filename = file_data["filename"]
-            total_rows += row_count
-            
-            input_body += f"{i}. {filename} - {row_count} satır"
-            if cities:
-                input_body += f" - Şehirler: {', '.join(cities)}"
-            input_body += "\n"
-        
-        input_body += f"\nToplam blok sayısı: {len(all_files_for_input)}\n"
-        input_body += f"Toplam satır sayısı: {total_rows}\n\n"
-        input_body += "İyi çalışmalar."
-        
-        # Sadece dosya yollarını al
-        attachments = [file_data["path"] for file_data in all_files_for_input]
-        
-        result = await send_email(
-            to_emails=[input_email],
-            subject=input_subject,
-            body=input_body,
-            attachments=attachments
-        )
-        
-        results.append({
-            "recipient": input_email,
-            "success": bool(result and result.get("success")),
-            "filename": f"{len(all_files_for_input)}_DOSYA",
-            "type": "INPUT_EMAIL"
-        })
-    
-    return results
-"""
 # 4
 async def _send_block_emails(output_files: Dict) -> List[Dict]:
     results = []
