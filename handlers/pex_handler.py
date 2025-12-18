@@ -1,7 +1,8 @@
 
 # PEX Handler
 import asyncio
-
+from uuid import uuid4
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 from aiogram import Router, F
@@ -11,7 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import datetime
 
-from utils.mailer import send_email
+from utils.mailer import send_email, EmailAttachment
 
 from config import config
 from utils.group_manager import group_manager
@@ -133,51 +134,76 @@ async def send_pex_mail(pex_files: List[Dict]) -> Dict:
 
 
 # PEX dosyalarını gruplara SERİ dağıtır - TEK MAIL ÇOKLU DOSYA
-# Her grup için tek mail
-# Tek mail, çoklu dosya gönderir
+# Her grup için tek mailde çoklu dosya gönderir
+# va,van-put gibi dosyaları ekler
+
 async def _send_group_mail(
     file_list: List[Dict], 
     group_info: Dict, 
     recipients: List[str]
 ) -> bool:
-    """Gruba tüm dosyaları TEK MAIL olarak gönderir (yeni merkezi sistem)"""
+    """Gruba tüm dosyaları TEK MAIL olarak gönderir (UUID disk / temiz mail ismi)"""
     try:
         if not file_list:
             return False
 
-        # Dosya yollarını hazırla
-        file_paths = []
-        for f in file_list:
-            p = Path(f["path"])
-            if p.exists():
-                file_paths.append(p)
+        # -----------------------------
+        # 1️⃣ MAIL ATTACHMENT HAZIRLA
+        # -----------------------------
+        attachments: List[EmailAttachment] = []
 
-        if not file_paths:
-            logger.warning(f"❌ {group_info.get('group_name')}: Gönderilecek dosya bulunamadı")
+        for f in file_list:
+            path = Path(f["path"])
+            original_name = f.get("filename")
+
+            if not path.exists():
+                logger.warning(f"⚠️ Dosya bulunamadı: {path}")
+                continue
+
+            attachments.append(
+                EmailAttachment(
+                    file_path=path,          # UUID'li disk yolu
+                    filename=original_name   # 👈 Mailde görünen temiz isim
+                )
+            )
+
+        if not attachments:
+            logger.warning(f"❌ {group_info.get('group_name')}: Gönderilecek dosya yok")
             return False
 
-        # Mail içeriğini hazırla
+        # -----------------------------
+        # 2️⃣ MAIL İÇERİĞİ
+        # -----------------------------
         subject, body = _prepare_group_email_content(file_list, group_info)
 
-        # Her alıcıya ayrı ayrı gönder
+        # -----------------------------
+        # 3️⃣ SERİ MAIL GÖNDERİMİ
+        # -----------------------------
         success = True
-        for recipient in recipients:          
-            ok = await send_email(
+
+        for recipient in recipients:
+            result = await send_email(
                 to_emails=[recipient],
                 subject=subject,
                 body=body,
-                attachments=file_paths
-            )  
-            
-            if not ok:
+                attachments=attachments
+            )
+
+            if not result.get("success"):
                 success = False
 
-        logger.info(f"{'✅' if success else '❌'} {group_info.get('group_name')} → {len(file_paths)} dosya gönderildi")
+        logger.info(
+            f"{'✅' if success else '❌'} "
+            f"{group_info.get('group_name')} → {len(attachments)} dosya gönderildi"
+        )
+
         return success
 
     except Exception as e:
         logger.error(f"❌ Grup mail hatası ({group_info.get('group_name')}): {e}")
         return False
+
+
 
 def _prepare_group_email_content(file_list: List[Dict], group_info: Dict) -> tuple:
     """
@@ -320,7 +346,7 @@ async def cmd_pex(message: Message, state: FSMContext):
         "📁 **PEX MODU - DOSYA ADI BAZLI DAĞITIM**\n\n"
         # "Lütfen dağıtmak istediğiniz dosyaları gönderin.\n\n"
         "📋 **KURALLAR:**\n"
-        "• Dosya adı SADECE  şehir adı olmalı: ankara gibi\n"
+        "• Dosya adı: İL-EK > van van-tur gibi\n"
         "• Desteklenenler: PDF, Excel, Word, resim, arşiv\n\n"
         
         "• ilk dosyayı TEK gönder(zorunlu)\n"
@@ -399,64 +425,94 @@ async def handle_process_pex(message: Message, state: FSMContext):
         await state.clear()
 
 
-# 3 BELGE: belge → belge handler, hatalı belge yakalar
+# 3-1 BELGE: belge → belge handler, hatalı belge yakalar
+# 3-2
 @router.message(PexProcessingStates.waiting_for_files, F.document)
 async def handle_pex_file_upload(message: Message, state: FSMContext):
-    """PEX dosyalarını işler"""
-    # Dosya formatı kontrolü
+    
     valid_extensions = {
-        # Mevcut formatlar
         '.pdf', '.xls', '.xlsx',
-        # Yeni eklenen formatlar
         '.csv', '.doc', '.docx', '.txt', '.rtf',
         '.ppt', '.pptx', '.odt', '.ods', '.odp',
         '.jpg', '.jpeg', '.png', '.gif', '.bmp',
         '.zip', '.rar', '.7z'
     }
-    
-    
-    file_ext = Path(message.document.file_name).suffix.lower()
-    
+
+    original_filename = message.document.file_name
+    file_ext = Path(original_filename).suffix.lower()
+
     if file_ext not in valid_extensions:
-        await message.answer("❌ Desteklenmeyen dosya formatı. -yalnız: pdf, doc, docx, excel, csv, zip, jpg, jpeg, png, ...")
-        return
-    
-    try:
-        # Dosya adından şehir adını çıkar
-        city_name = Path(message.document.file_name).stem.lower()
-        
-        # Mevcut state'deki dosyaları al
-        current_data = await state.get_data()
-        pex_files = current_data.get('pex_files', [])
-        
-        # Dosyayı indir 
-        file_info = await message.bot.get_file(message.document.file_id)
-        file_path = config.paths.INPUT_DIR / message.document.file_name
-        
-        await message.bot.download_file(file_info.file_path, file_path)
-        
-        # Dosya bilgisini kaydet
-        pex_files.append({
-            'path': file_path,
-            'filename': message.document.file_name,
-            'city_name': city_name,
-            'extension': file_ext
-        })
-        
-        await state.update_data(pex_files=pex_files)
-        
         await message.answer(
-            f"✅ Dosya eklendi: {message.document.file_name}\n"
-            f"🏙️  Algılanan şehir: {city_name.upper()}\n"
-            f"📁 Toplam dosya: {len(pex_files)}\n\n"
-            "📤 *DOSYA BEKLİYORUM...*\n\n"
-            "Dosya varsa ekle, dağıtmak için '/tamam' tıkla yada yaz\n\n"
-            "🛑 İptal için '/iptal' veya DUR butonu"
+            "❌ Desteklenmeyen dosya formatı.\n"
+            "Desteklenenler: pdf, excel, word, csv, zip, resim..."
         )
-        
+        return
+
+    try:
+        # -----------------------------
+        # 1️⃣ ŞEHİR ADI (DOSYA ADINDAN)
+        # -----------------------------
+        raw_name = Path(original_filename).stem.lower()
+
+        # "-" varsa öncesini al, yoksa tamamını kullan
+        city_name = raw_name.split("-", 1)[0].strip()
+
+
+        if not city_name.isalpha():
+            await message.answer(
+                "❌ Dosya adı şehir formatında değil.\n"
+                "Örnek: ankara.pdf veya ankara-ilce.pdf"
+            )
+            return
+
+
+        # -----------------------------
+        # 2️⃣ STATE VERİLERİNİ AL
+        # -----------------------------
+        data = await state.get_data()
+        pex_files = data.get("pex_files", [])
+
+        # -----------------------------
+        # 3️⃣ DİSKTE BENZERSİZ DOSYA ADI
+        # -----------------------------
+        unique_disk_name = f"{uuid4().hex}_{original_filename}"
+        file_path = config.paths.INPUT_DIR / unique_disk_name
+
+        # -----------------------------
+        # 4️⃣ TELEGRAM'DAN DOSYAYI İNDİR
+        # -----------------------------
+        file_info = await message.bot.get_file(message.document.file_id)
+        await message.bot.download_file(file_info.file_path, file_path)
+
+        # -----------------------------
+        # 5️⃣ DOSYA METADATA KAYDI
+        # -----------------------------
+        pex_files.append({
+            "file_id": uuid4().hex,          # sistemsel kimlik
+            "path": file_path,               # disk path (benzersiz)
+            "filename": original_filename,   # kullanıcıya görünen isim
+            "city_name": city_name,
+            "extension": file_ext,
+            "created_at": datetime.now()
+        })
+
+        await state.update_data(pex_files=pex_files)
+
+        # -----------------------------
+        # 6️⃣ KULLANICIYA BİLGİ
+        # -----------------------------
+        await message.answer(
+            f"✅ Dosya eklendi: {original_filename}\n"
+            f"🏙️ Algılanan şehir: {city_name.upper()}\n"
+            f"📁 Toplam dosya: {len(pex_files)}\n\n"
+            "📤 Dosya ekleyebilirsin\n"
+            "▶️ Dağıtım için: /tamam\n"
+            "🛑 İptal: /iptal veya DUR"
+        )
+
     except Exception as e:
-        logger.error(f"PEX dosya işleme hatası: {e}")
-        await message.answer("❌ Dosya işlenirken hata oluştu.")
+        logger.error(f"PEX dosya yükleme hatası: {e}")
+        await message.answer("❌ Dosya yüklenirken hata oluştu.")
 
 
 
@@ -476,9 +532,8 @@ async def handle_wrong_pex_input(message: Message):
     await message.answer(
         "❌ Lütfen PDF, Excel vb dosyası gönderin.\n\n"
         "📤 **DOSYA BEKLİYORUM...**\n"
-        "Desteklenenler: PDF, Excel, word, resim, ...\n\n"
-        "İşlemi başlatmak için '/tamam' tıkla yada yazın.\n"
-        "🛑 İptal etmek için '/iptal' yazın veya DUR butonuna basın."
+        "Başlatmak için '/tamam' tıkla\n"
+        "🛑 İptal: /iptal veya DUR"
     )
 
 
