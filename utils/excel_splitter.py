@@ -1,7 +1,7 @@
-# utils/excel_splitter.py
+# utils/excel_splitter.py - GÜNCELLENMİŞ
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Set
 import functools
 from concurrent.futures import ThreadPoolExecutor
 
@@ -18,10 +18,7 @@ _DEFAULT_POOL = ThreadPoolExecutor(max_workers=4)
 
 
 def _sync_read_all_rows(path: str) -> List[tuple]:
-    """Senkron: workbook'u açıp tüm satırları (values_only) okur ve kapatır.
-    Düşük-orta büyüklükteki dosyalar için uygundur. Çok büyük dosyalar için
-    chunked versiyon ekleyebiliriz.
-    """
+    """Senkron: workbook'u açıp tüm satırları (values_only) okur ve kapatır."""
     wb = load_workbook(path, read_only=True)
     try:
         ws = wb.active
@@ -43,7 +40,6 @@ def _sync_close_writer(wb: xlsxwriter.Workbook):
     try:
         wb.close()
     except Exception:
-        # xlsxwriter may raise on close if file already closed or stream issue
         raise
 
 
@@ -56,7 +52,6 @@ class ExcelSplitter:
     Async-friendly ExcelSplitter:
     - Senkron heavy IO'yu threadpool'a atar (openpyxl, xlsxwriter)
     - group_manager çağrılarını şehir bazlı cache'ler
-    - writer işlemlerini threadpool ile yapar (yada opsiyonel sync)
     """
 
     def __init__(self, input_path: str, headers: List[str], executor: ThreadPoolExecutor = None):
@@ -65,12 +60,14 @@ class ExcelSplitter:
         self.writers: Dict[str, xlsxwriter.Workbook] = {}
         self.sheets: Dict[str, Any] = {}
         self.row_counts: Dict[str, int] = {}
-        # self.matched_rows = 0
-        self.matched_row_ids = set()   # BENZERSİZ eşleşen satırlar
+        self.matched_row_ids: Set[int] = set()
         self.unmatched_data: List[tuple] = []
-        self.unmatched_cities = set()
+        self.unmatched_cities: Set[str] = set()
         self._city_cache: Dict[Any, List[str]] = {}
         self._executor = executor or _DEFAULT_POOL
+        
+        # YENİ: Gruplara göre şehir bilgisi
+        self.group_cities: Dict[str, Set[str]] = {}
 
     # ---------- helpers ----------
     async def _read_rows(self) -> List[tuple]:
@@ -91,12 +88,15 @@ class ExcelSplitter:
         file_path = output_dir / filename
 
         loop = asyncio.get_running_loop()
-        # create writer in threadpool to avoid blocking event loop
         wb_ws = await loop.run_in_executor(self._executor, functools.partial(_sync_create_writer, file_path, self.headers))
         wb, ws = wb_ws
         self.writers[group_id] = wb
         self.sheets[group_id] = ws
-        self.row_counts[group_id] = 1  # next row to write
+        self.row_counts[group_id] = 1
+        
+        # YENİ: Grup için şehir seti oluştur
+        self.group_cities[group_id] = set()
+        
         logger.debug(f"excelsplit Writer created for group {group_id}: {file_path}")
 
     async def _write_row(self, group_id: str, row: tuple) -> None:
@@ -104,10 +104,8 @@ class ExcelSplitter:
         ws = self.sheets[group_id]
         row_index = self.row_counts[group_id]
         loop = asyncio.get_running_loop()
-        # delegate actual write to threadpool
         await loop.run_in_executor(self._executor, functools.partial(_sync_write_row, ws, row_index, row))
         self.row_counts[group_id] += 1
-        # self.matched_rows += 1
 
     async def _close_all_writers(self) -> Dict[str, Dict[str, Any]]:
         """Close workbooks in threadpool and return output_files dict."""
@@ -116,11 +114,10 @@ class ExcelSplitter:
 
         for group_id, wb in list(self.writers.items()):
             try:
-                # get current row count
                 row_count = self.row_counts.get(group_id, 1) - 1
-                # close in threadpool
                 await loop.run_in_executor(self._executor, functools.partial(_sync_close_writer, wb))
                 ws_path = Path(wb.filename)
+                
                 if row_count <= 0:
                     if ws_path.exists():
                         try:
@@ -130,12 +127,18 @@ class ExcelSplitter:
                             logger.warning(f"excelsplit Failed to delete empty file {ws_path}: {e}")
                     continue
 
+                # YENİ: Şehir bilgisini output_files'a ekle
+                cities_in_group = list(self.group_cities.get(group_id, set()))
+                
                 output_files[group_id] = {
                     "filename": ws_path.name,
                     "path": ws_path,
                     "row_count": row_count,
+                    "cities": cities_in_group  # YENİ!
                 }
-                logger.info(f"📄 Saved: {ws_path.name} ({row_count} rows)")
+                
+                logger.info(f"📄 Saved: {ws_path.name} ({row_count} rows, {len(cities_in_group)} cities)")
+                
             except Exception as e:
                 logger.error(f"excelsplit Error closing workbook for {group_id}: {e}", exc_info=True)
 
@@ -147,11 +150,11 @@ class ExcelSplitter:
             logger.info("🔄 excelsplit Group manager initializing…")
             await group_manager._ensure_initialized()
 
-            logger.info("📥 excelsplit Reading input file (delegated to threadpool)…")
+            logger.info("📥 excelsplit Reading input file…")
             rows = await self._read_rows()
             processed_rows = 0
 
-            # build unique city set for caching
+            # Build unique city set for caching
             cities = set()
             for row in rows:
                 if row and len(row) > 1 and row[1]:
@@ -159,45 +162,24 @@ class ExcelSplitter:
 
             logger.debug(f"excelsplit Unique cities found: {len(cities)}")
 
-            # fetch groups for each city concurrently and cache results
-            # create tasks
-            city_tasks = {city: asyncio.create_task(group_manager.get_groups_for_city(city)) for city in cities}
-            if city_tasks:
-                # gather results
-                for city, task in city_tasks.items():
-                    try:
-                        groups = await task
-                        self._city_cache[city] = groups or []
-                    except Exception as e:
-                        logger.warning(f"excelsplit City lookup failed for {city}: {e}")
-                        self._city_cache[city] = []
+            # Fetch groups for each city concurrently and cache results
+            city_tasks = {city: asyncio.create_task(group_manager.get_groups_for_city(city)) 
+                         for city in cities}
+            
+            for city, task in city_tasks.items():
+                try:
+                    groups = await task
+                    self._city_cache[city] = groups or []
+                except Exception as e:
+                    logger.warning(f"excelsplit City lookup failed for {city}: {e}")
+                    self._city_cache[city] = []
 
-            # process rows using cached lookups
-            """for row in rows:
-                processed_rows += 1
-                # city position is expected at index 1 per earlier code
-                city = row[1] if row and len(row) > 1 else None
-                groups = []
-                if city:
-                    groups = self._city_cache.get(city, [])
-                # determine matches
-                has_match = False
-                if groups:
-                    for g in groups:
-                        if g != "grup_0":
-                            has_match = True
-                            await self._ensure_group_writer(g)
-                            await self._write_row(g, row)
-                if not has_match:
-                    if city:
-                        self.unmatched_cities.add(city)
-                        self.unmatched_data.append(row)
-             """
-
+            # Process rows
             for row_idx, row in enumerate(rows):
                 processed_rows += 1
                 city = row[1] if row and len(row) > 1 else None
                 groups = []
+                
                 if city:
                     groups = self._city_cache.get(city, [])
 
@@ -206,27 +188,26 @@ class ExcelSplitter:
                     for g in groups:
                         if g != "grup_0":
                             has_match = True
-
-                            # ✅ BENZERSİZ eşleşme burada sayılır
                             self.matched_row_ids.add(row_idx)
-
+                            
                             await self._ensure_group_writer(g)
                             await self._write_row(g, row)
+                            
+                            # YENİ: Şehri gruba ekle
+                            if city and g in self.group_cities:
+                                self.group_cities[g].add(city)
 
                 if not has_match:
                     if city:
                         self.unmatched_cities.add(city)
                         self.unmatched_data.append(row)
-
-             
             
-            
-            logger.info(f"✔excelsplit Processing complete. Total rows processed: {processed_rows}")
+            logger.info(f"✔ excelsplit Processing complete. Total rows processed: {processed_rows}")
 
-            # finalize writers (close and gather output file info)
+            # Finalize writers
             output_files = await self._close_all_writers()
 
-            # if unmatched data exists, create grup_0 file
+            # If unmatched data exists, create grup_0 file
             if self.unmatched_data:
                 group_id = "grup_0"
                 try:
@@ -236,28 +217,34 @@ class ExcelSplitter:
                     output_dir.mkdir(parents=True, exist_ok=True)
                     file_path = output_dir / filename
 
-                    # create unmatched workbook & write rows in threadpool
                     loop = asyncio.get_running_loop()
-                    wb_ws = await loop.run_in_executor(self._executor, functools.partial(_sync_create_writer, file_path, self.headers, "Eşleşmeyenler"))
+                    wb_ws = await loop.run_in_executor(self._executor, 
+                        functools.partial(_sync_create_writer, file_path, self.headers, "Eşleşmeyenler"))
                     wb, ws = wb_ws
-                    # write unmatched rows
+                    
                     for idx, row in enumerate(self.unmatched_data, start=1):
-                        await loop.run_in_executor(self._executor, functools.partial(_sync_write_row, ws, idx, row))
-                    await loop.run_in_executor(self._executor, functools.partial(_sync_close_writer, wb))
+                        await loop.run_in_executor(self._executor, 
+                            functools.partial(_sync_write_row, ws, idx, row))
+                    
+                    await loop.run_in_executor(self._executor, 
+                        functools.partial(_sync_close_writer, wb))
 
                     output_files[group_id] = {
                         "filename": file_path.name,
                         "path": file_path,
                         "row_count": len(self.unmatched_data),
+                        "cities": list(self.unmatched_cities)  # YENİ: Eşleşmeyen şehirler
                     }
-                    logger.info(f"📄excelsplit Eşleşmeyenler dosyası oluşturuldu: {filename} ({len(self.unmatched_data)} satır)")
+                    
+                    logger.info(f"📄 excelsplit Eşleşmeyenler dosyası: {filename} ({len(self.unmatched_data)} satır)")
+                    
                 except Exception as e:
-                    logger.error(f"excelsplit Eşleşmeyenler dosyası oluşturulurken hata: {e}", exc_info=True)
+                    logger.error(f"excelsplit Eşleşmeyenler dosyası hatası: {e}", exc_info=True)
 
             return {
                 "success": True,
-                "processed_rows": processed_rows,              # işlenen  - eşleştirilen  Excel satırı
-                "matched_rows": len(self.matched_row_ids), # BENZERSİZ eşleşen
+                "processed_rows": processed_rows,
+                "matched_rows": len(self.matched_row_ids),
                 "unmatched_rows": len(self.unmatched_data),
                 "output_files": output_files,
                 "unmatched_cities": list(self.unmatched_cities),

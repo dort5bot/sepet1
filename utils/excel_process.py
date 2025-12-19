@@ -24,11 +24,13 @@ SMTP bağlantısı her mailde 1 kere kullanılır aç-kapat
 """
 
 import asyncio
-from pathlib import Path
-from typing import Dict, Any, List
-import tempfile
 import zipfile
+import tempfile
+
+
+from pathlib import Path
 from datetime import datetime
+from typing import Dict, Any, List
 
 from config import config
 from utils.excel_cleaner import AsyncExcelCleaner
@@ -79,9 +81,14 @@ def calculate_mail_stats(mail_results: List[Dict]) -> Dict:
 # ANA AKIŞ
 # ============================================================
 
-async def process_excel_task(input_path: Path, user_id: int) -> Dict[str, Any]:
+async def process_excel_task(input_path: Path, user_id: int, main_excel_name: str = None) -> Dict[str, Any]:
+        
     mail_results: List[Dict] = []
     temp_files: List[str] = []
+    
+    # Eğer main_excel_name verilmediyse, input_path'den al (kova işlemi)
+    if main_excel_name is None:
+        main_excel_name = input_path.name
 
     try:
         logger.info(f"📊 Excel işleme başlatıldı: {input_path.name}")
@@ -101,6 +108,13 @@ async def process_excel_task(input_path: Path, user_id: int) -> Dict[str, Any]:
 
         output_files = splitting_result["output_files"]
 
+        # Tüm şehirleri topla
+        all_cities = set()
+        for file_info in output_files.values():
+            cities = file_info.get("cities", [])
+            if isinstance(cities, list):
+                all_cities.update(cities)
+
         mail_results.extend(await _send_group_emails(output_files))
         mail_results.extend(await send_input_only_email(input_path))
 
@@ -113,7 +127,12 @@ async def process_excel_task(input_path: Path, user_id: int) -> Dict[str, Any]:
             "unmatched_cities": splitting_result.get("unmatched_cities", []),
             "mail_results": mail_results,
             "mail_stats": calculate_mail_stats(mail_results),
-            "input_filename": input_path.name,  # ✅ Doğrudan burada ekliyoruz
+            "input_filename": input_path.name,
+            "main_excel_name": main_excel_name, # ✅ blok ana dosya adı - main_excel_name
+            
+            # Şehir bilgisi
+            "all_cities": list(all_cities),
+            "city_count": len(all_cities),
         }
 
         mail_results.extend(
@@ -250,12 +269,18 @@ async def _send_personal_email(
     zip_path = await create_backup_zip(input_path, output_files)
     # report_text = generate_processing_report(processing_result, "mail")
 
+    # main_excel_name yoksa input_filename kullan
+    # Ana dosya adını kullan
+    main_excel_name = processing_result.get("main_excel_name", input_path.name)
+
     report_text = generate_processing_report(processing_result)
 
 
     result = await send_email(
         to_emails=[email],
-        subject=f"📦 Excel Data Raporu - {input_path.name}",
+        # subject=f"📦 Excel Data Raporu - {input_path.name}",
+        # subject=f"📦 Excel Data Raporu - {filename_for_subject}",
+        subject=f"📦 Excel Data Raporu - {main_excel_name}",
         body=f"Merhaba,\n\n{report_text}\n\nİyi çalışmalar,\nData_listesi_Hıdır",
         attachments=[zip_path]
     )

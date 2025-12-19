@@ -22,10 +22,9 @@ import tempfile
 import os
 import aiofiles
 from pathlib import Path
-#import pandas as pd
-from datetime import datetime
 
-from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta # Excel tarih
+from concurrent.futures import ThreadPoolExecutor # Excel tarih düzeltici yardımcı
 
 # Sabitler
 MAX_HEADER_SEARCH_ROWS = 5
@@ -34,6 +33,57 @@ MAX_COLUMN_WIDTH = 25
 HEADER_ROW_BUFFER = 2
 MAX_FILE_SIZE_MB = 50  # Maksimum dosya boyutu
 CHUNK_SIZE = 1000  # Büyük dosyalar için chunk boyutu
+
+
+# Excel tarih düzeltici yardımcı
+def fix_excel_date(value):
+    """
+    Excel tarih değerlerini Python datetime.date nesnesine çevirir
+    """
+    from datetime import datetime, date, timedelta
+    
+    # 1. None kontrolü
+    if value is None:
+        return None
+    
+    # 2. Zaten datetime.date ise
+    if isinstance(value, date):
+        return value
+    
+    # 3. datetime.datetime ise, sadece tarih kısmını al
+    if isinstance(value, datetime):
+        return value.date()
+    
+    # 4. Excel seri numarası ise (int/float)
+    if isinstance(value, (int, float)):
+        try:
+            # Excel 1899-12-30'dan başlar
+            base_date = date(1899, 12, 30)
+            return base_date + timedelta(days=float(value))
+        except Exception:
+            return value
+    
+    # 5. String ise
+    if isinstance(value, str):
+        value = value.strip()
+        try:
+            # Önce datetime olarak parse et
+            dt = None
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
+                try:
+                    dt = datetime.strptime(value, fmt)
+                    break
+                except ValueError:
+                    continue
+            
+            if dt:
+                return dt.date()
+        except Exception:
+            pass
+    
+    # 6. Diğer durumlarda olduğu gibi döndür
+    return value
+    
 
 class AsyncExcelCleaner:
     """Excel dosya temizleme işlemlerini asenkron olarak yöneten sınıf"""
@@ -63,6 +113,8 @@ class AsyncExcelCleaner:
             self._sync_find_header_row, 
             ws
         )
+    
+    
     
     def _sync_find_header_row(self, ws: Worksheet) -> int:
         """Başlık satırını senkron olarak bulur"""
@@ -134,6 +186,7 @@ class AsyncExcelCleaner:
     #  Veri kaybı yapmaz
     #  Hayalet satırları atar
     #  Sayımı doğru yapar
+                  
     def _sync_copy_data_chunked(
         self,
         source_ws: Worksheet,
@@ -154,18 +207,36 @@ class AsyncExcelCleaner:
         real_row_count = 0
 
         for row in range(header_row + 1, source_ws.max_row + 1):
-
             city_val = source_ws.cell(row=row, column=city_idx).value
-            date_val = source_ws.cell(row=row, column=date_idx).value
-
+            source_date_cell = source_ws.cell(row=row, column=date_idx)
+            date_val = source_date_cell.value
+            
             # 🔴 SADECE BU KONTROL
             if city_val is None and date_val is None:
                 continue
 
             # ✔ GERÇEK VERİ SATIRI
-            target_ws.cell(row=new_row_idx, column=1, value=date_val)
+            # Tarih hücresini oluştur
+            target_date_cell = target_ws.cell(row=new_row_idx, column=1)
+            
+            # datetime nesnesini string olarak formatla
+            if isinstance(date_val, datetime):
+                # Sadece tarih kısmını al (YYYY-MM-DD formatında)
+                date_str = date_val.strftime("%Y-%m-%d")
+                target_date_cell.value = date_str
+                target_date_cell.number_format = "YYYY-MM-DD"
+            elif isinstance(date_val, date):  # datetime.date nesnesi
+                date_str = date_val.strftime("%Y-%m-%d")
+                target_date_cell.value = date_str
+                target_date_cell.number_format = "YYYY-MM-DD"
+            else:
+                # Diğer durumlarda olduğu gibi kopyala
+                target_date_cell.value = date_val
+            
+            # Şehir bilgisini yaz
             target_ws.cell(row=new_row_idx, column=2, value=city_val)
 
+            # Diğer sütunları kopyala
             for new_col_idx, source_col in enumerate(other_columns, start=3):
                 target_ws.cell(
                     row=new_row_idx,
@@ -177,9 +248,9 @@ class AsyncExcelCleaner:
             real_row_count += 1
 
         return real_row_count
+    
 
-
-       
+    
     async def _adjust_column_widths(self, ws: Worksheet):
         """Sütun genişliklerini asenkron olarak ayarlar"""
         loop = asyncio.get_event_loop()

@@ -1,195 +1,40 @@
 """
-Ana dosya: Başlık her zaman var → sorun yok.
-Veri dosyası: Başlık varsa alınır, yoksa v1, v2... atanır → sağlanıyor.
-Merge sırasında TC sütunu korunursa, her şey düzgün çalışır
+Özellikler:
+işlem: Merge ve GSM ekleme → sonuc.xlsx
+işlem: City/İL düzenleme → sonuc_final.xlsx
+İşlemler sıralı olarak tek betikte çalışıyor.
 
-Bu kodun sağladıkları:
-Ana dosya TC sütunu korunuyor.
-Veri dosyasındaki başlıklar varsa kullanılıyor.
-Eksik veya boş başlıklar otomatik olarak v1, v2, v3 gibi atanıyor.
-Merge sonrası, df2’den gelen TC sütunu ve geçici kolonlar siliniyor.
-TC sütunundan hemen sonra df2 verileri ekleniyor.
 """
-# import pandas as pd
-# from pathlib import Path
-
-"""def read_excel_with_fallback(path: Path) -> pd.DataFrame:
-    df = pd.read_excel(path, header=None)
-    first_row = df.iloc[0]
-
-    if first_row.isna().all():
-        # Başlık tamamen boşsa otomatik üret
-        df.columns = [f"bs{i+1}" for i in range(df.shape[1])]
-        df = df.iloc[1:].reset_index(drop=True)
-    else:
-        # Başlık varsa 1. satır başlık olarak al
-        df.columns = df.iloc[0]
-        df = df.iloc[1:].reset_index(drop=True)
-
-    return df
-"""
-"""def build_merged_excel(
-    ana_dosya: Path,
-    veri_dosya: Path,
-    output_path: Path
-) -> Path:
-
-    # --- 1. Dosyaları oku ve başlıkları kontrol et ---
-    df1 = read_excel_with_fallback(ana_dosya)
-    df2 = read_excel_with_fallback(veri_dosya)
-
-    # --- 2. TC sütunlarını bul (case/space insensitive) ---
-    tc1 = next(c for c in df1.columns if str(c).strip().upper() == "TC")
-    tc2 = next(c for c in df2.columns if str(c).strip().upper() == "TC")
-
-    # --- 3. df2'de TC sonrası 3 sütunu al (veya varsa kadar) ---
-    tc2_index = df2.columns.get_loc(tc2)
-    veri_cols = df2.columns[tc2_index + 1 : tc2_index + 4].tolist()  # 3 kolon
-
-    # Boş veya NaN başlıkları otomatik doldur
-    veri_cols = [
-        f"v{i+1}" if (pd.isna(c) or str(c).strip() == "") else c
-        for i, c in enumerate(veri_cols)
-    ]
-
-    # Eksik kolon varsa üret
-    for col in veri_cols:
-        if col not in df2.columns:
-            df2[col] = pd.NA
-
-    # Sadece gerekli kolonlar
-    df2_small = df2[[tc2] + veri_cols]
-
-    # --- 4. Merge ---
-    merged = df1.merge(
-        df2_small,
-        how="left",
-        left_on=tc1,
-        right_on=tc2
-    )
-
-    # --- 5. Sabit hedef: TC'den sonra ilk uygun kolondan başlayacak ---
-    tc_index = merged.columns.get_loc(tc1)
-    target_index = tc_index + 1  # TC’den sonra hemen yaz
-
-    # --- 6. YOKSA ÜRET (kolon sayısını garanti et) ---
-    needed = target_index + len(veri_cols) - len(merged.columns)
-    if needed > 0:
-        for i in range(needed):
-            merged[f"_auto_{i}"] = pd.NA
-
-    # --- 7. Üstüne yaz ---
-    print(f"[LOG] target_index: {target_index}, veri_cols: {veri_cols}")
-    print(f"[LOG] merged.shape: {merged.shape}")
-    merged.iloc[:, target_index : target_index + len(veri_cols)] = merged[veri_cols].values
-    print("[LOG] Üstüne yazma tamamlandı")
-
-    # --- 8. Geçici merge kolonlarını sil ---
-    merged.drop(columns=[tc2] + veri_cols, inplace=True)
-
-    # --- 9. Kaydet ---
-    merged.to_excel(output_path, index=False)
-
-    return output_path
-"""
-
-
-
-"""def read_excel_with_fallback(path: Path) -> pd.DataFrame:
-    df = pd.read_excel(path, header=None)
-    first_row = df.iloc[0]
-
-    if first_row.isna().all():
-        # Başlık tamamen boşsa otomatik üret
-        df.columns = [f"bs{i+1}" for i in range(df.shape[1])]
-        df = df.iloc[1:].reset_index(drop=True)
-    else:
-        # Başlık varsa 1. satır başlık olarak al
-        df.columns = df.iloc[0]
-        df = df.iloc[1:].reset_index(drop=True)
-
-    return df
-"""
-
-"""def build_merged_excel(
-    ana_dosya: Path,
-    veri_dosya: Path,
-    output_path: Path
-) -> Path:
-
-    # --- 1. Dosyaları oku ---
-    df1 = read_excel_with_fallback(ana_dosya)
-    df2 = read_excel_with_fallback(veri_dosya)
-
-    # --- 2. TC sütunlarını bul ---
-    tc1 = next(c for c in df1.columns if str(c).strip().upper() == "TC")
-    tc2 = next(c for c in df2.columns if str(c).strip().upper() == "TC")
-
-    # --- 3. df2'de TC sonrası 3 sütunu al (varsa kadar) ---
-    tc2_index = df2.columns.get_loc(tc2)
-    veri_cols = df2.columns[tc2_index + 1 : tc2_index + 4].tolist()
-
-    # Boş başlık varsa otomatik isim ata
-    veri_cols = [
-        f"v{i+1}" if (pd.isna(c) or str(c).strip() == "") else c
-        for i, c in enumerate(veri_cols)
-    ]
-
-    # Eksik kolon varsa df2’de üret
-    for col in veri_cols:
-        if col not in df2.columns:
-            df2[col] = pd.NA
-
-    # Sadece gerekli kolonlar
-    df2_small = df2[[tc2] + veri_cols]
-
-    # --- 4. Merge ---
-    merged = df1.merge(
-        df2_small,
-        how="left",
-        left_on=tc1,
-        right_on=tc2,
-        suffixes=("", "_y")  # df1 TC kalacak, df2 TC geçici olacak
-    )
-
-    # --- 5. TC sonrası yazma ---
-    tc_index = merged.columns.get_loc(tc1)
-    target_index = tc_index + 1
-
-    # Yeterli sütun yoksa oluştur
-    needed = target_index + len(veri_cols) - len(merged.columns)
-    if needed > 0:
-        for i in range(needed):
-            merged[f"_auto_{i}"] = pd.NA
-
-    # Veri sütunlarını kopyala
-    merged.iloc[:, target_index : target_index + len(veri_cols)] = merged[veri_cols].values
-
-    # --- 6. Geçici df2 sütunlarını sil ---
-    merged.drop(columns=[tc2] + veri_cols, inplace=True)
-
-    # --- 7. Kaydet ---
-    merged.to_excel(output_path, index=False)
-
-    return output_path
-"""
-# l
 import pandas as pd
 from pathlib import Path
 from typing import List
 
-
 # -------------------------------------------------
-# 1) Excel oku – 1.satır HER ZAMAN başlık
+# işlem-1 → dosya1(ham)  ile dosya2(tel)  arasında eşleştirme yapılır İL-TC-GSM oluşur
 # -------------------------------------------------
-def read_excel_smart(path: Path) -> pd.DataFrame:
-    df = pd.read_excel(path)
-    df.columns = [
-        str(c).strip() if str(c).strip() else f"auto_{i+1}"
-        for i, c in enumerate(df.columns)
-    ]
+# -------------------------------------------------
+# 1) Excel oku – normalize ve tekrar eden kolonları düzelt
+# -------------------------------------------------
+def normalize_and_deduplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
+    new_cols = []
+    seen = {}
+    for c in df.columns:
+        col = str(c).strip()
+        if not col:
+            col = "auto"
+        if col in seen:
+            seen[col] += 1
+            col = f"{col}_{seen[col]}"
+        else:
+            seen[col] = 1
+        new_cols.append(col)
+    df.columns = new_cols
     return df
 
+def read_excel_smart(path: Path) -> pd.DataFrame:
+    df = pd.read_excel(path)
+    df.columns = [str(c).strip() if str(c).strip() else "" for c in df.columns]
+    return normalize_and_deduplicate_columns(df)
 
 # -------------------------------------------------
 # 2) Kolon bulucu (case/space insensitive)
@@ -201,44 +46,23 @@ def find_col(df: pd.DataFrame, name: str) -> str:
             return c
     raise ValueError(f"Zorunlu kolon bulunamadı: {name}")
 
-
 # -------------------------------------------------
 # 3) ANA MERGE (TC ASLA SİLİNMEZ)
 # -------------------------------------------------
-def build_merged_excel(
-    ham_dosya: Path,
-    tel_dosya: Path,
-    output_path: Path
-) -> Path:
-
-    # --- oku ---
+def build_merged_excel(ham_dosya: Path, tel_dosya: Path, output_path: Path) -> Path:
     df_ham = read_excel_smart(ham_dosya)
     df_tel = read_excel_smart(tel_dosya)
 
-    # --- kolonlar ---
     ham_tc = find_col(df_ham, "TC")
     tel_tc = find_col(df_tel, "TC")
     tel_col = find_col(df_tel, "TEL")
 
-    # --- TC'leri STRING yap + .0 TEMİZLE (ÖNCE!) ---
-    df_ham[ham_tc] = (
-        df_ham[ham_tc]
-        .astype(str)
-        .str.replace(r"\.0$", "", regex=True)
-        .str.strip()
-    )
+    # TC sütunlarını string yap ve .0 temizle
+    df_ham[ham_tc] = df_ham[ham_tc].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+    df_tel[tel_tc] = df_tel[tel_tc].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
 
-    df_tel[tel_tc] = (
-        df_tel[tel_tc]
-        .astype(str)
-        .str.replace(r"\.0$", "", regex=True)
-        .str.strip()
-    )
-
-    # --- SADECE GEREKLİ KOLONLAR (SONRA!) ---
     df_tel_small = df_tel[[tel_tc, tel_col]]
 
-    # --- MERGE ---
     merged = df_ham.merge(
         df_tel_small,
         how="left",
@@ -247,21 +71,137 @@ def build_merged_excel(
         suffixes=("", "_TEL")
     )
 
-    # --- sağdan gelen TC'yi sil ---
+    # Sağdan gelen TC'yi sil
     if f"{tel_tc}_TEL" in merged.columns:
         merged.drop(columns=[f"{tel_tc}_TEL"], inplace=True)
 
-    # --- GSM'yi TC yanına koy ---
+    # GSM'yi TC yanına koy
     tc_index = merged.columns.get_loc(ham_tc)
-
     if "GSM" not in merged.columns:
         merged.insert(tc_index + 1, "GSM", merged[tel_col])
     else:
         merged["GSM"] = merged[tel_col]
 
-    # --- geçici TEL kolonunu sil ---
+    # Geçici TEL kolonunu sil
     merged.drop(columns=[tel_col], inplace=True)
 
-    # --- kaydet ---
+    # Merge sonucu kaydet
     merged.to_excel(output_path, index=False)
     return output_path
+
+# -------------------------------------------------
+# işlem-2 → City/İL düzenleme kovaya tam uyumu yapı
+# -------------------------------------------------
+
+import re
+import unicodedata
+
+class CityProcessor:
+    _CITY_DICT = None
+    _CITY_REGEX = None
+
+    @staticmethod
+    def normalize_turkish(text: str) -> str:
+        if not isinstance(text, str):
+            return ""
+
+        text = text.replace("İ", "I").replace("ı", "i").lower()
+        text = unicodedata.normalize("NFKD", text)
+        text = "".join(c for c in text if not unicodedata.combining(c))
+
+        return (
+            text.replace("ş", "s")
+                .replace("ç", "c")
+                .replace("ü", "u")
+                .replace("ö", "o")
+                .replace("ğ", "g")
+        )
+
+    @classmethod
+    def get_city_dict(cls):
+        if cls._CITY_DICT is None:
+            raw = [
+                "Adana","Adıyaman","Afyon","Afyonkarahisar","Ağrı","Aksaray","Amasya","Ankara",
+                "Antalya","Ardahan","Artvin","Aydın",
+                "Balıkesir","Bartın","Batman","Bayburt","Bilecik","Bingöl","Bitlis","Bolu","Burdur","Bursa",
+                "Çanakkale","Çankırı","Çorum","Denizli","Diyarbakır","Düzce",
+                "Edirne","Elazığ","Erzincan","Erzurum","Eskişehir",
+                "Gaziantep","Giresun","Gümüşhane","Hakkari","Hatay",
+                "Iğdır","Isparta","İstanbul","İzmir","İçel",
+                "Kahramanmaraş","Karabük","Karaman","Kars","Kastamonu","Kayseri","Kilis",
+                "Kırıkkale","Kırklareli","Kırşehir","Kocaeli","Konya","Kütahya",
+                "Malatya","Manisa","Mardin","Mersin","Muğla","Muş",
+                "Nevşehir","Niğde","Ordu","Osmaniye","Rize",
+                "Sakarya","Samsun","Siirt","Sinop","Sivas",
+                "Şanlıurfa","Şırnak","Tekirdağ","Tokat","Trabzon","Tunceli",
+                "Uşak","Van","Yalova","Yozgat","Zonguldak"
+            ]
+            cls._CITY_DICT = {cls.normalize_turkish(c): c for c in raw}
+        return cls._CITY_DICT
+
+    @classmethod
+    def get_city_regex(cls):
+        if cls._CITY_REGEX is None:
+            city_dict = cls.get_city_dict()
+            pattern = r"\b(" + "|".join(sorted(city_dict.keys(), key=len, reverse=True)) + r")\b"
+            cls._CITY_REGEX = re.compile(pattern)
+        return cls._CITY_REGEX
+
+
+def process_city_il(input_file: Path, output_file: Path):
+    df = pd.read_excel(input_file)
+
+    # 1- İL → City
+    if "İL" in df.columns:
+        df.rename(columns={"İL": "City"}, inplace=True)
+    else:
+        df["City"] = ""
+
+    # 2- Yeni İL kolonu
+    if "İL" not in df.columns:
+        df.insert(df.columns.get_loc("City") + 1, "İL", "")
+
+    city_dict = CityProcessor.get_city_dict()
+    city_regex = CityProcessor.get_city_regex()
+
+    # 3- TEK SEFERDE normalize (vektörel)
+    city_norm = (
+        df["City"]
+        .astype(str)
+        .map(CityProcessor.normalize_turkish)
+    )
+
+    # 4- Regex ile şehir yakala
+    found = city_norm.str.extract(city_regex, expand=False)
+
+    # 5- Orijinal şehir adına map et
+    df["İL"] = found.map(city_dict)
+
+
+    # 6- ffill (tek satır!)
+    df["İL"] = df["İL"].ffill().infer_objects(copy=False)
+
+
+    # 7- City sil
+    df.drop(columns=["City"], inplace=True)
+
+    df.to_excel(output_file, index=False)
+    print(f"✅ İşlem tamamlandı → {output_file}")
+
+
+
+# -------------------------------------------------
+# 5) Ana program
+# -------------------------------------------------
+if __name__ == "__main__":
+    ham = Path("ham.xlsx")
+    tel = Path("tel.xlsx")
+    merged_file = Path("sonuc.xlsx")
+    final_file = Path("sonuc_final.xlsx")
+
+    # 1. işlem: Merge
+    build_merged_excel(ham, tel, merged_file)
+    print("✅ 1. işlem tamamlandı → sonuc.xlsx oluşturuldu")
+
+    # 2. işlem: City/İL düzenleme
+    process_city_il(merged_file, final_file)
