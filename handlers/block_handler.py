@@ -44,11 +44,11 @@ async def cmd_block(message: Message, state: FSMContext):
     """Blok işlemleri başlat"""
     await state.set_state(BlockProcessingStates.waiting_for_main)
     await message.answer(
-        "📄 **Blok İşlemleri**\n\n"
+        "📄 **Blok (SGK) İşlemleri**\n\n"
         "2 dosyada TC=TEL eşleştirir, gruplara atar\n"
         "1.satıra ZORUNLU başlıklar yazılmalı\n\n"
-        "1️⃣ Ham dosya (TC-İL-TARİH) gönderin\n"
-        "2️⃣ Tel dosyası (TC-TEL) gönderin"
+        "1️⃣ .dosya Ham dosya (TC-İL-TARİH) gönder\n"
+        "2️⃣ .dosya Tel dosyası (TC-TEL) gönder"
     )
 
 
