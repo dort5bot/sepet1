@@ -1,15 +1,16 @@
+# [file name]: block_handler.py
+# [file content begin]
 """
-Blok bazlı Excel işleme handler'ı
+Blok bazlı Excel işleme handler'ı (Basitleştirilmiş)
 AKIŞ:
-1) Ana Excel alınır
-2) Veri Excel alınır
-3) TC MERGE yapılır
-4) MERGED dosya bloklamaya girer
-5) Çıktılar mail + raporlanır
+1) Ana Excel alınır (ham)
+2) Veri Excel alınır (tel)
+3) TC MERGE yapılır (tek dosya)
+4) MERGED dosya excel_process modülü ile işlenir
+Ham Excel → Tel Excel → TC Merge → Excel Process → Sonuç
 """
 
 import asyncio
-from typing import Dict, List
 from pathlib import Path
 import tempfile
 
@@ -20,280 +21,183 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from config import config
-from utils.tc_merger import build_merged_excel
-from utils.excel_cleaner import AsyncExcelCleaner
-from utils.block_splitter import split_excel_by_blocks
+from utils.tc_merger import build_merged_excel, process_city_il
+from utils.excel_process import process_excel_task
 from utils.reporter import generate_processing_report
 from utils.mailer import send_email
-from utils.group_manager import group_manager
 from utils.logger import logger
 
-
 router = Router(name="block_processor")
-
-
-# block_handler.py'nin en üstüne ekle (import'lardan sonra):
-# mail sayım işlemleri
-
-def build_mail_result(mail_type: str, success: bool, recipient=None, filename=None, **extra) -> Dict:
-    return {
-        "mail_type": mail_type,
-        "success": success,
-        "recipient": recipient,
-        "filename": filename,
-        **extra
-    }
-
-def calculate_mail_stats(mail_results: List[Dict]) -> Dict:
-    return {
-        "total": sum(1 for m in mail_results if m["mail_type"] in ("group", "input")),
-        "sent": sum(1 for m in mail_results if m["mail_type"] in ("group", "input") and m["success"]),
-        "failed": sum(1 for m in mail_results if m["mail_type"] in ("group", "input") and not m["success"]),
-        "by_type": {
-            "group": sum(1 for m in mail_results if m["mail_type"] == "group"),
-            "group_sent": sum(1 for m in mail_results if m["mail_type"] == "group" and m["success"]),
-            "input": sum(1 for m in mail_results if m["mail_type"] == "input"),
-            "input_sent": sum(1 for m in mail_results if m["mail_type"] == "input" and m["success"]),
-            "personal": sum(1 for m in mail_results if m["mail_type"] == "personal"),
-            "personal_sent": sum(1 for m in mail_results if m["mail_type"] == "personal" and m["success"]),
-        }
-    }
-    
-    
-   
-
 
 
 # ===================== FSM =====================
 
 class BlockProcessingStates(StatesGroup):
-    waiting_for_main = State()   # Ana dosya
-    waiting_for_data = State()   # Veri dosyası
-
-
-# ===================== HELPERS =====================
-
-async def _download_excel(message: Message) -> Path:
-    """Telegram'dan Excel indir"""
-    file_info = await message.bot.get_file(message.document.file_id)
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    tmp.close()
-    await message.bot.download_file(file_info.file_path, tmp.name)
-    return Path(tmp.name)
+    waiting_for_main = State()   # Ham dosya (TC-İL-TARİH)
+    waiting_for_data = State()   # Tel dosyası (TC-TEL)
 
 
 # ===================== COMMAND =====================
 
 @router.message(Command("block"))
 async def cmd_block(message: Message, state: FSMContext):
+    """Blok işlemleri başlat"""
     await state.set_state(BlockProcessingStates.waiting_for_main)
     await message.answer(
-        "📄 **Blok işlemleri**\n\n"
-        "2 dosyada TC=TEL eşleştirir, gruplara atar\n\n"
-        "1.dosya(ana)  TC-İL-TARİH zorunlu yazılacak. (BLOK YAPISININ TEMELİ)\n\n"
-        "2.dosya(tel)  TC-TEL zorunlu yazılacak."
+        "📄 **Blok İşlemleri**\n\n"
+        "2 dosyada TC=TEL eşleştirir, gruplara atar\n"
+        "1.satıra ZORUNLU başlıklar yazılmalı\n\n"
+        "1️⃣ Ham dosya (TC-İL-TARİH) gönderin\n"
+        "2️⃣ Tel dosyası (TC-TEL) gönderin"
     )
 
 
-# ===================== MAIN FILE =====================
+# ===================== HAM DOSYA -  İlk Excel dosyasını işle =====================
 
 @router.message(BlockProcessingStates.waiting_for_main, F.document)
 async def handle_main_excel(message: Message, state: FSMContext):
+    """İlk Excel dosyasını işle (ham)"""
     if not message.document.file_name.endswith((".xlsx", ".xls")):
-        await message.answer("❌ Sadece Excel dosyaları desteklenir")
+        await message.answer("❌ Sadece Excel dosyaları (.xlsx, .xls) kabul edilir")
         return
 
-    main_path = await _download_excel(message)
-    await state.update_data(main_excel=main_path)
+    try:
+        # Dosyayı indir
+        file_info = await message.bot.get_file(message.document.file_id)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        tmp.close()
+        await message.bot.download_file(file_info.file_path, tmp.name)
+        
+        # ✅ İLK DOSYA ADINI KAYDET
+        main_excel_name = message.document.file_name
+        
+        await state.update_data({
+            "main_excel": Path(tmp.name),
+            "main_excel_name": main_excel_name  # ✅ Dosya adını kaydet
+        })
+        await state.set_state(BlockProcessingStates.waiting_for_data)
+        
+        await message.answer(
+            f"✅ **İlk dosya alındı: {main_excel_name}**\n\n"
+            "📄 **İkinci Excel dosyasını gönderin**\n"
+            "(TC - TEL sütunları olmalı)"
+        )
+        
+    except Exception as e:
+        logger.error(f"Dosya indirme hatası: {e}")
+        await message.answer("❌ Dosya indirilemedi")
+        await state.clear()
 
-    await state.set_state(BlockProcessingStates.waiting_for_data)
-    await message.answer(
-        "📄 **Veri alınacak Excel dosyasını gönderin**\n\n"
-        "TC - TEL zorunlu TC ile eşleştirme yapılacaktır."
-    )
-
-
-# ===================== DATA FILE → MERGE → BLOCK =====================
+# ===================== TEL DOSYASI → MERGE → İŞLEME =====================
 
 @router.message(BlockProcessingStates.waiting_for_data, F.document)
 async def handle_data_excel(message: Message, state: FSMContext):
+    """İkinci Excel dosyasını işle ve süreci başlat"""
     if not message.document.file_name.endswith((".xlsx", ".xls")):
-        await message.answer("❌ Sadece Excel dosyaları desteklenir")
+        await message.answer("❌ Sadece Excel dosyaları (.xlsx, .xls) kabul edilir")
         return
 
     data = await state.get_data()
-    main_excel: Path = data["main_excel"]
-    data_excel = await _download_excel(message)
-
-    loop = asyncio.get_running_loop()
+    main_excel = data.get("main_excel")
+    main_excel_name = data.get("main_excel_name", "Bilinmeyen Dosya")
+    
+    
+    if not main_excel or not main_excel.exists():
+        await message.answer("❌ İlk dosya bulunamadı, işlem iptal edildi")
+        await state.clear()
+        return
 
     try:
-        await message.answer("🔗 TC eşleştirmesi yapılıyor...")
+        # İkinci dosyayı indir
+        file_info = await message.bot.get_file(message.document.file_id)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        tmp.close()
+        await message.bot.download_file(file_info.file_path, tmp.name)
+        data_excel = Path(tmp.name)
 
-        merged_path = await loop.run_in_executor(
+        await message.answer("🔄 **İşlem başlatıldı...**")
+
+        # 1. TC Merge işlemi
+        await message.answer("1️⃣ TC eşleştirmesi yapılıyor...")
+        
+        merge_path = config.paths.TEMP_DIR / "blok1.xlsx"
+        final_merged = await asyncio.get_running_loop().run_in_executor(
             None,
             build_merged_excel,
             main_excel,
             data_excel,
-            config.paths.TEMP_DIR / "merged.xlsx"
+            merge_path
         )
 
-        await message.answer("🧹 Excel başlıkları temizleniyor...")
-
-        cleaner = AsyncExcelCleaner()
-        cleaning = await cleaner.clean_excel_headers(str(merged_path))
-        if not cleaning["success"]:
-            await message.answer("❌ Excel temizleme hatası")
-            await state.clear()
-            return
-
-        await message.answer("📊 Şehir blokları işleniyor...")
-
-        splitting = await split_excel_by_blocks(
-            cleaning["temp_path"],
-            cleaning["headers"]
+        # 2. City/İL düzenleme
+        await message.answer("2️⃣ Şehir/İL düzenlemesi yapılıyor...")
+        
+        final_path = config.paths.TEMP_DIR / "blok.xlsx"
+        await asyncio.get_running_loop().run_in_executor(
+            None,
+            process_city_il,
+            final_merged,
+            final_path
         )
-        if not splitting["success"]:
-            await message.answer("❌ Bloklama hatası")
-            await state.clear()
-            return
 
-        await message.answer("📧 Mailler gönderiliyor...")
+        # 3. Excel işleme (excel_process modülü)
+        await message.answer("3️⃣ Excel işleme ve mail gönderimi başlatılıyor...")
 
-        mail_results = await _send_block_emails(splitting["output_files"])
+        # processing_result = await process_excel_task(final_path, user_id=message.from_user.id)
 
-        report = generate_processing_report({
-            "success": True,
-            "output_files": splitting["output_files"],
-            "mail_results": mail_results,
-            "mail_stats": calculate_mail_stats(mail_results),
-            "input_filename": message.document.file_name,
-            "total_rows": cleaning.get("row_count", 0),
-            "matched_rows": splitting.get("matched_rows", 0),
-            "unmatched_cities": splitting.get("unmatched_cities", [])
-        })
+        # ✅ main_excel_name'i parametre olarak gönder
+        processing_result = await process_excel_task(
+            final_path, 
+            user_id=message.from_user.id,
+            main_excel_name=main_excel_name  # Bu parametreyi ekleyin
+        )
+
+        # ilk dosya adını İşlem sonucuna ekle
+        processing_result['main_excel_name'] = main_excel_name  # <-- buraya ekle
 
 
 
-        await message.answer(report)
+        # 4. Sonuç raporu
+        if processing_result.get("success", False):
+            # Telegram mesajı için rapor (detaylı)
+            report_text = generate_processing_report(processing_result, for_internal_message=True)
 
-        if config.email.PERSONAL_EMAIL:
-            await send_email(
-                to_emails=[config.email.PERSONAL_EMAIL],
-                subject=f"📦 Blok Excel Raporu - {message.document.file_name}",
-                body=report
-            )
+       
+            await message.answer(f"✅ **İşlem Tamamlandı**\n\n{report_text}")
+        else:
+            error_msg = processing_result.get("error", "Bilinmeyen hata")
+            await message.answer(f"❌ **İşlem Başarısız**\n\nHata: {error_msg}")
 
     except Exception as e:
-        logger.error("❌ Block işlem hatası", exc_info=True)
-        await message.answer(f"❌ İşlem hatası: {str(e)}")
+        logger.error(f"Block işlem hatası: {e}", exc_info=True)
+        await message.answer(f"❌ **İşlem Hatası**\n\n{str(e)}")
 
     finally:
+        # Temizlik
+        try:
+            for path in [main_excel, data_excel]:
+                if path and path.exists():
+                    path.unlink(missing_ok=True)
+            
+            temp_files = ["blok1.xlsx", "blok.xlsx"]
+            for file_name in temp_files:
+                file_path = config.paths.TEMP_DIR / file_name
+                if file_path.exists():
+                    file_path.unlink(missing_ok=True)
+        except Exception as cleanup_error:
+            logger.warning(f"Geçici dosya temizleme hatası: {cleanup_error}")
+        
         await state.clear()
 
 
-# ===================== MAIL =====================
-# 4
-async def _send_block_emails(output_files: Dict) -> List[Dict]:
-    results = []
-    
-    # INPUT_EMAIL için tüm dosya bilgilerini topla
-    input_email = config.email.INPUT_EMAIL
-    all_files_for_input = []  # (file_path, row_count, cities) tuple listesi
-    
-    for group_id, file_info in output_files.items():
-        if file_info["row_count"] <= 0:
-            continue
+# ===================== DURUM SORGULAMA =====================
 
-        # 1) Gruplara mail gönder
-        group_info = await group_manager.get_group_info(group_id)
-        recipients = [r for r in group_info.get("email_recipients", []) if r]
-
-        subject = f"{group_info.get('group_name', group_id)} - Blok Datası"
-        body = (
-            f"Merhaba,\n\n"
-            f"{file_info['row_count']} satırlık blok veriler ekte gönderilmiştir.\n"
-            f"Şehirler: {', '.join(file_info.get('cities', []))}\n\n"
-            f"İyi çalışmalar,\nData_listesi_Hıdır"
-        )
-
-        for recipient in recipients:
-            result = await send_email(
-                to_emails=[recipient],
-                subject=subject,
-                body=body,
-                attachments=[file_info["path"]]
-            )
-
-            # ✅ Yeni formatı kullan:
-            results.append(
-                build_mail_result(
-                    "group",
-                    bool(result and result.get("success")),
-                    recipient=recipient,
-                    filename=file_info["filename"],
-                    error=result.get("error") if result else None
-                )
-            )
-
-            await asyncio.sleep(1.2)
-        
-        # INPUT_EMAIL için dosya bilgilerini topla
-        all_files_for_input.append({
-            "path": file_info["path"],
-            "row_count": file_info["row_count"],
-            "cities": file_info.get("cities", []),
-            "filename": file_info["filename"],
-            "group_id": group_id
-        })
-    
-    # 2) INPUT_EMAIL'e TÜM dosyaları tek mailde gönder
-    if input_email and all_files_for_input:
-        input_subject = f"📥 BLOK İŞLEMİ (input) Datası -"
-        input_body = (
-            f"Merhaba,\n\n"
-            f"Blok işlemi tamamlandı. Tüm çıktı dosyaları bu mailin ekinde gönderilmiştir.\n\n"
-            f"Toplam {len(all_files_for_input)} adet Excel dosyası:\n"
-        )
-        
-        # Dosya listesini oluştur
-        total_rows = 0
-        for i, file_data in enumerate(all_files_for_input, 1):
-            row_count = file_data["row_count"]
-            cities = file_data["cities"]
-            filename = file_data["filename"]
-            total_rows += row_count
-            
-            input_body += f"{i}. {filename} - {row_count} satır"
-            if cities:
-                input_body += f" - Şehirler: {', '.join(cities)}"
-            input_body += "\n"
-        
-        input_body += f"\nToplam blok sayısı: {len(all_files_for_input)}\n"
-        input_body += f"Toplam satır sayısı: {total_rows}\n\n"
-        input_body += "İyi çalışmalar,\nData_listesi_Hıdır"
-        
-        attachments = [file_data["path"] for file_data in all_files_for_input]
-        
-        result = await send_email(
-            to_emails=[input_email],
-            subject=input_subject,
-            body=input_body,
-            attachments=attachments
-        )
-        
-        # ✅ INPUT mailini de aynı formatta ekle:
-        results.append(
-            build_mail_result(
-                "input",
-                bool(result and result.get("success")),
-                recipient=input_email,
-                filename=f"{len(all_files_for_input)}_DOSYA",
-                error=result.get("error") if result else None
-            )
-        )
-    
-    return results
-    
-    
-    
+@router.message(Command("cancel"))
+async def cmd_cancel(message: Message, state: FSMContext):
+    """Mevcut işlemi iptal et"""
+    current_state = await state.get_state()
+    if current_state:
+        await state.clear()
+        await message.answer("❌ İşlem iptal edildi")
+    else:
+        await message.answer("❌ Aktif bir işlem yok")
