@@ -218,7 +218,7 @@ def _prepare_group_email_content(file_list: List[Dict], group_info: Dict) -> tup
         f"Merhaba,\n\n"
         f"{group_name} grubu için {len(file_list)} adet dosya ektedir.\n"
         f"Dosya türleri: {', '.join(file_types)}\n"
-        f"İlgili şehirler: {', '.join(cities)}\n"
+        f"İller: {', '.join(cities)}\n"
         f"Dosyalar: {', '.join([f['filename'] for f in file_list])}\n\n"
         f"İyi çalışmalar,\nData_listesi_Hıdır"
     )

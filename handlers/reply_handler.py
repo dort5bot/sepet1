@@ -21,6 +21,11 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
+import asyncio
+RUNNING_TASKS: dict[int, asyncio.Task] = {}
+
+
+
 # Handler loader uyumlu router tanımı
 router = Router(name="reply_keyboard")
 
@@ -44,9 +49,9 @@ class ReplyKeyboardManager:
             keyboard=[
                 [
                     KeyboardButton(text="oku"), 
-                    KeyboardButton(text="Blok"),  # YENİ
                     KeyboardButton(text="Kova"), 
-                    KeyboardButton(text="PEX")
+                    KeyboardButton(text="PEX"),
+                    KeyboardButton(text="Sgk")  # YENİ
                 ],
                 [
                     KeyboardButton(text="🛑 DUR"),
@@ -66,7 +71,8 @@ async def _show_reply_keyboard(message: Message, title: str = "📋 Hızlı Eri�
     """
     keyboard = ReplyKeyboardManager.get_keyboard()
     await message.answer(
-        f"{title}\n\nSeçeneklerden birini seçin:",
+        # f"{title}\n\nSeçeneklerden birini seçin:",    >> başlık kod içinde: 📋 Hızlı
+        f"🔷Bir işlem seçin:🔷",
         reply_markup=keyboard,
     )
 
@@ -80,27 +86,23 @@ async def _send_welcome_message(message: Message) -> None:
         "İşlemden önce yada işlem iptali için *🛑 DUR* tıkla \n\n"
         
         "🔄 İşlem Akışı:\n"
-        "⚡️ Exceli gruplara ayırmak\n"
-        "• Excel'de 1. satırda 'TARİH' ve 'İL' sütunları olmalı\n"
+        "⚡️ kova: Exceli gruplara ayırmak\n"
+        "• Zorunlu: Excel'de 1.satırda 'TARİH', 'İL' sütunları olmalı\n"
         "• *Kova* tıkla Excel işlemini başlat\n"
         "• Excel dosyasını yükle, gönder \n\n"
         
-        "⚡️ şehir isimli dosyaları gruplara göndermek\n"
-        "• PEX için dosya adı sadece şehir olmalı (örn: ankara)\n"
+        "⚡️ PEX: şehir isimli dosyaları gruplara göndermek\n"
+        "• zorunlu: dosya adı şehir olmalı (van, van-tuşpa)\n"
         "• *Pex* tıkla işlemi başlat\n"
         "• pdf yada excel dosyasını yükle\n"
         "• İLK dosya TEK , diğerleri topluca yükle, bitince /tamam 'ı tıkla \n\n"
         
-        "⚡️ Blok datayı gruplara göndermek\n"
-        "1.dosya(ana) 1.satırda TC-İL-TARİH zorunlu yazılacak.\n"
-        "2.dosya(tel) 1.satırda TC-TEL zorunlu yazılacak.\n"
-        "Yükleme bitince sistem otmotik başlayacak.\n"
-        "tüm il bilgisi için> input raporuna bak.\n\n"
-        
-        "⚡️ Grup işlemleri\n"
-        "Yenilemek için 1. json oluştur *js* tıkla \n"
-        "grup bilgisi >admin > Grup yönet > grup detay\n"
-        ">admin > Grup dosyasını yükle, oluşan json yükle\n"
+        "⚡️ Sgk: Blok datayı gruplara göndermek\n"
+        "• Dosya-1(ana) 1.satırda TC-İL-TARİH zorunlu yazılacak.\n"
+        "• Dosya-2 (tel) 1.satırda TC-TEL zorunlu yazılacak.\n"
+        "• Yükleme bitince sistem otmotik başlayacak.\n\n"
+        " ❗️ dosya yüklenir ve işlem başlarsa, durdurulamaz"
+
     )
     await message.answer(welcome_text)
     await _show_reply_keyboard(message)
@@ -112,16 +114,16 @@ async def _send_welcome_message(message: Message) -> None:
 # Kova’ya girdim → vazgeçtim → iptal → PEX başlasın
 
 """
+(FSM-merkezli iptal)
 Kova’ya girdim → vazgeçtim → iptal → PEX başlasın
-Yani:
-Kova state’i tam temizlenecek
-Dosyalar temizlenecek
-FSM tamamen sıfırlanacak
 Sonrasında PEX’e girince eski state’den EN UFACIK iz kalmayacak
 
-
-Tüm aktif işlemleri ve state'leri temizle
-Tüm handler'lar için ortak iptal fonksiyonu
+FSM kesin ve doğru biçimde temizlenir
+Dosyalar state varken temizlenir (en kritik nokta)
+Mail / rapor / FSM zinciri devam etmez
+Kullanıcıya doğru ve gerçekçi mesaj gider
+Tek merkez (reply / cancel handler)
+❌ İş fiziksel olarak çalışır, bu ZOR çok ek saçma kod gerektirir
 
 Args:
 clear_files: Dosyaları da temizle (🛑 DUR için True)
@@ -133,10 +135,6 @@ async def cancel_all_operations(
     state: FSMContext,
     clear_files: bool = False
 ) -> None:
-    """
-    Tüm aktif işlemleri ve state'leri temizle
-    Tüm handler'lar için ortak iptal fonksiyonu
-    """
     current_state = await state.get_state()
 
     # 1️⃣ DOSYALARI TEMİZLE (state varken!)
@@ -155,7 +153,7 @@ async def cancel_all_operations(
         await message.answer(
             f"❌ **{action_text}**\n\n"
             f"• Aktif durum: `{state_name}`\n"
-            f"• Temizlendi: ✅\n\n"
+            f"• 🧹 Temizlik yapıldı: ✅\n\n"
             f"Yeni bir işlem başlatabilirsiniz.",
             reply_markup=ReplyKeyboardManager.get_keyboard()
         )
@@ -196,22 +194,14 @@ async def handle_oku_button(message: Message) -> None:
     """oku butonu - hoşgeldin mesajı"""
     await _send_welcome_message(message)
     
-# 🧹 Sadece dosya temizliği yapıldı
+
 @router.message(lambda m: m.text and m.text == "🛑 DUR")
 async def handle_stop_button(message: Message, state: FSMContext) -> None:
     """TEST: 🛑 DUR butonu"""
     current_state = await state.get_state()
     await cancel_all_operations(message, state, clear_files=True)
     
-   
 
-   
-
-@router.message(lambda m: m.text and m.text == "Blok")
-async def handle_block_button(message: Message, state: FSMContext):
-    """Blok butonu"""
-    from handlers.block_handler import cmd_block
-    await cmd_block(message, state)
 
 @router.message(lambda m: m.text and m.text == "Kova")
 async def handle_kova_button(message: Message, state: FSMContext) -> None:
@@ -219,12 +209,18 @@ async def handle_kova_button(message: Message, state: FSMContext) -> None:
     from handlers.kova_handler import cmd_process
     await cmd_process(message, state)
 
-
 @router.message(lambda m: m.text and m.text == "PEX")
 async def handle_pex_button(message: Message, state: FSMContext) -> None:
     """PEX butonu - dosya dağıtımı"""
     from handlers.pex_handler import cmd_pex
     await cmd_pex(message, state)
+
+@router.message(lambda m: m.text and m.text == "Sgk")
+async def handle_sgk_button(message: Message, state: FSMContext):
+    """sgk butonu"""
+    from handlers.sgk_handler import cmd_sgk
+    await cmd_sgk(message, state)
+
 
 
 @router.message(lambda m: m.text and m.text == "Js")
@@ -260,7 +256,13 @@ async def handle_admin_button(message: Message) -> None:
     
     from handlers.admin_handler import get_admin_keyboard
     keyboard = get_admin_keyboard()
-    await message.answer("👑 **Admin Paneli**\n\nAşağıdaki seçeneklerden birini seçin:", reply_markup=keyboard)
-    
-    
+    text = (
+        "👑 **Admin Paneli**\n\n"
+        "⚡️ **Grup bilgisi işlemleri**\n"
+        "Yenilemek için **1. json oluştur (js)** tıkla\n"
+        "grup bilgisi → admin → Grup yönet → grup detay\n"
+        "admin → Grup dosyasını yükle, oluşan json'u yükle"
+    )
+    await message.answer(text, reply_markup=keyboard)
+        
     

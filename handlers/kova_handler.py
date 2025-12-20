@@ -151,7 +151,13 @@ async def cmd_process(message: Message, state: FSMContext):
     /process VE /kova komutları - aynı işi yapar
     """
     await state.set_state(ProcessingStates.waiting_for_file)
-    await message.answer("📤 Lütfen işlemek istediğiniz Excel dosyasını gönderin...")
+    await message.answer(
+        "📤 İşlemek istediğin Excel dosyasını gönder...\n"
+        "🛑 İptal için tıkla: '/iptal' veya bas: DUR"
+    )
+
+    
+    
 
 @router.message(ProcessingStates.waiting_for_file, F.text)
 async def handle_cancel_command(message: Message, state: FSMContext):
