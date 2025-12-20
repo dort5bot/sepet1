@@ -22,7 +22,7 @@ Hiçbir mail Excel işlemleri devam ederken gönderilmez.
 SMTP bağlantısı her mailde 1 kere kullanılır aç-kapat
 
 """
-
+# utils/excel_process.py
 import asyncio
 import zipfile
 import tempfile
@@ -279,8 +279,7 @@ async def _send_personal_email(
     result = await send_email(
         to_emails=[email],
         # subject=f"📦 Excel Data Raporu - {input_path.name}",
-        # subject=f"📦 Excel Data Raporu - {filename_for_subject}",
-        subject=f"📦 Excel Data Raporu - {main_excel_name}",
+        subject=f"📦 Excel Data Raporu - {main_excel_name} - {input_path.name}",
         body=f"Merhaba,\n\n{report_text}\n\nİyi çalışmalar,\nData_listesi_Hıdır",
         attachments=[zip_path]
     )

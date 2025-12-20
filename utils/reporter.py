@@ -137,15 +137,6 @@ def generate_processing_report(
         # -------------------------------------------------
         # 6) TELEGRAM RAPORU İÇİN EKSTRA
         # -------------------------------------------------
-        # if for_internal_message:
-            # report_lines.append(
-                # f"• Personal: {mail_stats.get('by_type', {}).get('personal_sent', 0)}",
-                # f"• Dosyadaki iller: {cities_list}",
-            # )
-
-        # -------------------------------------------------
-        # 6) TELEGRAM RAPORU İÇİN EKSTRA
-        # -------------------------------------------------
         if for_internal_message:
             report_lines.extend([
                 f"• Personal: {mail_stats.get('by_type', {}).get('personal_sent', 0)}",
