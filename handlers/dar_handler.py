@@ -1,6 +1,6 @@
 # handlers/dar_handler.py
 """
-v7+1 > 7
+v7+1 > 7> 8
 # handlers/dar_handler.py
 komut aciklaması yok (commat_info)> aktif dönemde anlamlı 
 # Aiogram 3.x uyumlu
@@ -49,7 +49,8 @@ logger = logging.getLogger(__name__)
 router = Router(name="dar_handler")
 
 # Kök dizin (proje kökü)
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+#PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(os.getenv("BOT_ROOT", Path(__file__).resolve().parents[1])).resolve()
 TMP_DIR = Path(tempfile.gettempdir())
 TMP_DIR.mkdir(parents=True, exist_ok=True)
 TELEGRAM_NAME = os.getenv("TELEGRAM_NAME", "hbot")
