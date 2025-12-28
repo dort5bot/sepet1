@@ -51,12 +51,12 @@ class ReplyKeyboardManager:
                     KeyboardButton(text="oku"), 
                     KeyboardButton(text="Kova"), 
                     KeyboardButton(text="PEX"),
-                    KeyboardButton(text="Sgk")  # YENİ
+                    KeyboardButton(text="Sgk")  
                 ],
                 [
                     KeyboardButton(text="🛑 DUR"),
                     KeyboardButton(text="Js"), 
-                    KeyboardButton(text="istatistik"),
+                    KeyboardButton(text="notlar"), #KeyboardButton(text="istatistik")
                     KeyboardButton(text="Admin")
                 ],
             ],
@@ -195,10 +195,11 @@ async def handle_oku_button(message: Message) -> None:
     await _send_welcome_message(message)
     
 
-@router.message(lambda m: m.text and m.text == "🛑 DUR")
+# @router.message(lambda m: m.text and m.text == "🛑 DUR")
+@router.message(lambda m: m.text in {"🛑 DUR", "Ev"})
 async def handle_stop_button(message: Message, state: FSMContext) -> None:
-    """TEST: 🛑 DUR butonu"""
-    current_state = await state.get_state()
+    """🛑 DUR butonu: işlemleri durdurur, merkeze döner"""
+    # current_state = await state.get_state()
     await cancel_all_operations(message, state, clear_files=True)
     
 
@@ -229,9 +230,9 @@ async def handle_json_button(message: Message, state: FSMContext) -> None:
     from handlers.json_handler import handle_json_command
     await handle_json_command(message, state)
 
+
 # handle_stats_button fonksiyonunu değiştir
 #  Herhangi bir kullanıcı admin paneli ve istatistiklerine erişm önlemek
-
 @router.message(lambda m: m.text and m.text == "istatistik")
 async def handle_stats_button(message: Message) -> None:
     """istatistik butonu - sistem istatistiklerini göster"""
@@ -243,6 +244,14 @@ async def handle_stats_button(message: Message) -> None:
     
     from handlers.admin_handler import _show_admin_stats
     await _show_admin_stats(message)
+
+
+@router.message(lambda m: m.text and m.text == "notlar")
+async def handle_not_button(message: Message, state: FSMContext) -> None:
+    from handlers.not_handler import notlar_ana
+    await notlar_ana(message, state)
+
+
 
 
 @router.message(lambda m: m.text and m.text == "Admin")
@@ -259,9 +268,12 @@ async def handle_admin_button(message: Message) -> None:
     text = (
         "👑 **Admin Paneli**\n\n"
         "⚡️ **Grup bilgisi işlemleri**\n"
-        "Yenilemek için **1. json oluştur (js)** tıkla\n"
-        "grup bilgisi → admin → Grup yönet → grup detay\n"
-        "admin → Grup dosyasını yükle, oluşan json'u yükle"
+        "➡️ Grup yönetimi\n"
+        "- grup detay bilgisi için\n\n"
+        "➡️ Grup Dosyası Yükle\n"
+        "- mevcut grup bilgisini güncellemek için\n"
+        "1 Yenilemek için **1. json oluştur (js)** tıkla\n"
+        "2 Grup dosyasını yükle  →  json'u yükle"
     )
     await message.answer(text, reply_markup=keyboard)
         

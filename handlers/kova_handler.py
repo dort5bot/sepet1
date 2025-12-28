@@ -140,7 +140,7 @@ async def cmd_start(message: Message):
         #"Lütfen işlemek istediğiniz Excel dosyasını gönderin.\n"
         #"Dosyada 1.satırda 'TARİH' ve 'İL' sütunları bulunmalıdır.\n"
         " Tüm işlemleri görmek için sanal klavyeye geç\n"
-        "sanal klavye için tıkla  /klavye yada /r yaz \n"
+        "sanal klavye için tıkla  yada yaz:  /r  \n"
         "sonra açıklamaları görmek için 'oku' butonuna bas"
     )
 
