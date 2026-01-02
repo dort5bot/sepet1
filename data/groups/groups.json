@@ -328,21 +328,9 @@
     },
     {
       "group_id": "grup_17",
-      "group_name": "canakkale_sube",
-      "email_recipients": [
-        "ozguracar1977@gmail.com"
-      ],
-      "cities": [
-        "canakkale_sube",
-        "çanakkale"
-      ]
-    },
-    {
-      "group_id": "grup_18",
       "group_name": "samsun_sube",
       "email_recipients": [
-        "samsunanadoluhasar@gmail.com",
-        "anadoluhasarsinem@gmail.com"
+        "samsunanadoluhasar@gmail.com"
       ],
       "cities": [
         "samsun_sube",
@@ -359,5 +347,4 @@
       ]
     }
   ]
-
 }
