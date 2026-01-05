@@ -86,8 +86,10 @@ def build_merged_excel(ham_dosya: Path, tel_dosya: Path, output_path: Path) -> P
     merged.drop(columns=[tel_col], inplace=True)
 
     # Merge sonucu kaydet
+    # → sonuc.xlsx
     merged.to_excel(output_path, index=False)
     return output_path
+
 
 # -------------------------------------------------
 # işlem-2 → City/İL düzenleme kovaya tam uyumu yapı
@@ -184,7 +186,25 @@ def process_city_il(input_file: Path, output_file: Path):
 
     # 7- City sil
     df.drop(columns=["City"], inplace=True)
+    
 
+    # 8→ TC'si geçersiz olan satırları sil
+    tc_col = "TC"  # işlem-1'den gelen orijinal TC
+
+    before_rows = len(df)
+    df = df[
+        df[tc_col].notna() &
+        (df[tc_col].astype(str).str.strip() != "") &
+        (df[tc_col].astype(str).str.lower() != "nan")
+    ]
+    after_rows = len(df)
+    removed = before_rows - after_rows
+
+    print(f"🧹 FINAL: geçersiz TC için silinen satır sayısı: {removed}")
+
+
+    # FİNAL: sonuçları kaydet
+    # → sonuc_final.xlsx
     df.to_excel(output_file, index=False)
     print(f"✅ İşlem tamamlandı → {output_file}")
 
