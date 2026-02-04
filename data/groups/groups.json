@@ -285,68 +285,6 @@
         "bartın",
         "sinop"
       ]
-    },
-    {
-      "group_id": "grup_14",
-      "group_name": "nigde_sube",
-      "email_recipients": [
-        "anadolu.group51@hotmail.com"
-      ],
-      "cities": [
-        "nigde_sube",
-        "kayseri",
-        "nevşehir",
-        "aksaray",
-        "niğde",
-        "karaman"
-      ]
-    },
-    {
-      "group_id": "grup_15",
-      "group_name": "emre_oztur_hukuk",
-      "email_recipients": [
-        "emre.anadoluexpert@gmail.com"
-      ],
-      "cities": [
-        "emre_oztur_hukuk",
-        "istanbul",
-        "kocaeli",
-        "sakarya",
-        "tekirdağ"
-      ]
-    },
-    {
-      "group_id": "grup_16",
-      "group_name": "savas_ugur_hukuk",
-      "email_recipients": [
-        "savas.anadoluexpert@gmail.com"
-      ],
-      "cities": [
-        "savas_ugur_hukuk",
-        "istanbul",
-        "kocaeli",
-        "sakarya"
-      ]
-    },
-    {
-      "group_id": "grup_17",
-      "group_name": "samsun_sube",
-      "email_recipients": [
-        "samsunanadoluhasar@gmail.com"
-      ],
-      "cities": [
-        "samsun_sube",
-        "kastamonu",
-        "samsun",
-        "ordu",
-        "giresun",
-        "trabzon",
-        "rize",
-        "artvin",
-        "amasya",
-        "çorum",
-        "tokat"
-      ]
     }
   ]
 }
