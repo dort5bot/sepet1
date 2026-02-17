@@ -1,5 +1,4 @@
 # [file name]: sgk_handler.py
-# [file content begin]
 """
 Sgk bazlı Excel işleme handler'ı (Basitleştirilmiş)
 AKIŞ:
@@ -137,7 +136,7 @@ async def handle_data_excel(message: Message, state: FSMContext):
         # 2. City/İL düzenleme
         await message.answer("2️⃣ Şehir/İL düzenlemesi yapılıyor...")
         
-        final_path = config.paths.TEMP_DIR / "sgk.xlsx"
+        final_path = config.paths.TEMP_DIR / "sgk2.xlsx"
         await asyncio.get_running_loop().run_in_executor(
             None,
             process_city_il,
@@ -182,7 +181,7 @@ async def handle_data_excel(message: Message, state: FSMContext):
                 if path and path.exists():
                     path.unlink(missing_ok=True)
             
-            temp_files = ["sgk1.xlsx", "sgk.xlsx"]
+            temp_files = ["sgk1.xlsx", "sgk2.xlsx"]
             for file_name in temp_files:
                 file_path = config.paths.TEMP_DIR / file_name
                 if file_path.exists():
