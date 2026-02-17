@@ -1,8 +1,15 @@
 """
+tc_merger.py
+17/02/2026
 Özellikler:
 işlem: Merge ve GSM ekleme → sonuc.xlsx
 işlem: City/İL düzenleme → sonuc_final.xlsx
 İşlemler sıralı olarak tek betikte çalışıyor.
+
+ham + tel 
+↓>> sgk1  (merge, eşleşme) 
+↓>> sgk2  (İL düzenler + TC validasyonu + satır- sutun temizler)
+>> excel_process (gruplama / mail / rapor)
 
 """
 import pandas as pd
@@ -48,6 +55,7 @@ def find_col(df: pd.DataFrame, name: str) -> str:
 
 # -------------------------------------------------
 # 3) ANA MERGE (TC ASLA SİLİNMEZ)
+# TC referans alır, tel eşleştirmesi yapar
 # -------------------------------------------------
 def build_merged_excel(ham_dosya: Path, tel_dosya: Path, output_path: Path) -> Path:
     df_ham = read_excel_smart(ham_dosya)
@@ -149,8 +157,7 @@ class CityProcessor:
             cls._CITY_REGEX = re.compile(pattern)
         return cls._CITY_REGEX
 
-
-def process_city_il(input_file: Path, output_file: Path):
+def process_city_il_eski(input_file: Path, output_file: Path):
     df = pd.read_excel(input_file)
 
     # 1- İL → City
@@ -203,19 +210,99 @@ def process_city_il(input_file: Path, output_file: Path):
     print(f"🧹 FINAL: geçersiz TC için silinen satır sayısı: {removed}")
 
 
+
+    # =================================================
+    # 🔥 FINAL: TEMİZLİK
+    # Gereksiz sutunlar, tekrarlı satırlar silinir.
+    # =================================================
+
+    # 9️- Unnamed kolonları sil
+    df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
+
+    # 10-  TC'ye göre tekrarları sil (ilk satır kalsın)
+    df = df.drop_duplicates(subset=["TC"], keep="first")
+
+    # =================================================
     # FİNAL: sonuçları kaydet
-    # → sonuc_final.xlsx
+    # → sonuc_final.xlsx →→ sgk2.xlsx
+    # =================================================
     df.to_excel(output_file, index=False)
     print(f"✅ İşlem tamamlandı → {output_file}")
 
 
 
+
+
+def process_city_il(input_file: Path, output_file: Path):
+    df = pd.read_excel(input_file)
+
+    # 1- İL → City düzenlemeleri (Mevcut mantık)
+    if "İL" in df.columns:
+        df.rename(columns={"İL": "City"}, inplace=True)
+    else:
+        df["City"] = ""
+
+    if "İL" not in df.columns:
+        df.insert(df.columns.get_loc("City") + 1, "İL", "")
+
+    city_dict = CityProcessor.get_city_dict()
+    city_regex = CityProcessor.get_city_regex()
+
+    city_norm = df["City"].astype(str).map(CityProcessor.normalize_turkish)
+    found = city_norm.str.extract(city_regex, expand=False)
+    df["İL"] = found.map(city_dict)
+    df["İL"] = df["İL"].ffill().infer_objects(copy=False)
+
+    if "City" in df.columns:
+        df.drop(columns=["City"], inplace=True)
+
+    # 2- TC Geçersiz Satırları Sil
+    tc_col = "TC" 
+    df = df[df[tc_col].notna() & (df[tc_col].astype(str).str.strip() != "") & (df[tc_col].astype(str).str.lower() != "nan")]
+
+    # =================================================
+    # 🔥 SIRALAMA VE TEMİZLİK MANTIĞI
+    # =================================================
+
+    # 1. SIRANO kolonunu (varsa) tamamen sil
+    sirano_cols = [c for c in df.columns if "SIRANO" in str(c).upper()]
+    df.drop(columns=sirano_cols, inplace=True, errors='ignore')
+
+    # 2. Grupları Tanımla
+    bas_grup = ["İL", "TARİH", "TEDAVİ", "DURUM"]
+    son_grup = ["TC", "AD", "GSM"]
+    
+    # Mevcut olanları filtrele (Dosyada eksik sütun varsa hata vermemesi için)
+    mevcut_bas = [c for c in bas_grup if c in df.columns]
+    mevcut_son = [c for c in son_grup if c in df.columns]
+    
+    # Arada kalan "Diğerleri" (Hem baş grupta hem son grupta olmayanlar)
+    digerleri = [c for c in df.columns if c not in mevcut_bas and c not in mevcut_son]
+
+    # 3. Yeni Sıralamayı Birleştir: [BAŞ] + [DİĞERLERİ] + [SON]
+    yeni_siralam = mevcut_bas + digerleri + mevcut_son
+    df = df[yeni_siralam]
+
+    # 4. Final Temizlik
+    df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
+    df = df.drop_duplicates(subset=["TC"], keep="first")
+
+    # Kaydet
+    df.to_excel(output_file, index=False)
+    print(f"✅ İşlem ve Özel Sıralama Tamamlandı → {output_file}")
+    
+
+
+
+
 # -------------------------------------------------
 # 5) Ana program
+# bağımsız test için: dosya+ham+tel aynı klasörde olmalı
+# python tc_merger.py
 # -------------------------------------------------
 if __name__ == "__main__":
-    ham = Path("ham.xlsx")
-    tel = Path("tel.xlsx")
+    ham = Path("sham.xlsx")
+    tel = Path("stel.xlsx")
     merged_file = Path("sonuc.xlsx")
     final_file = Path("sonuc_final.xlsx")
 
