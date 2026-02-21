@@ -215,7 +215,6 @@
       "cities": [
         "corum_sube",
         "amasya",
-        "ankara",
         "çankırı",
         "çorum",
         "kastamonu",
@@ -287,21 +286,6 @@
       ]
     },
     {
-      "group_id": "grup_14",
-      "group_name": "nigde_sube",
-      "email_recipients": [
-        "anadolu.group51@hotmail.com"
-      ],
-      "cities": [
-        "nigde_sube",
-        "kayseri",
-        "nevşehir",
-        "aksaray",
-        "niğde",
-        "karaman"
-      ]
-    },
-    {
       "group_id": "grup_15",
       "group_name": "emre_oztur_hukuk",
       "email_recipients": [
@@ -329,23 +313,15 @@
       ]
     },
     {
-      "group_id": "grup_17",
-      "group_name": "samsun_sube",
+      "group_id": "grup_18",
+      "group_name": "atilla_sb",
       "email_recipients": [
-        "samsunanadoluhasar@gmail.com"
+        "atisigorta07@gmail.com"
       ],
       "cities": [
-        "samsun_sube",
-        "kastamonu",
-        "samsun",
-        "ordu",
-        "giresun",
-        "trabzon",
-        "rize",
-        "artvin",
-        "amasya",
-        "çorum",
-        "tokat"
+        "atilla_sube",
+        "antalya",
+        "muğla"
       ]
     }
   ]
