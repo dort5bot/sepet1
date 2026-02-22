@@ -333,7 +333,7 @@ async def _send_personal_email(result: Dict, input_email_sent: bool, file_count:
     return "\n".join(report_lines)
 
 
-# ================== komut blok ==============================
+# ================== komut bölümü ==============================
 
 # PEX işlemini başlat - (RAPOR MAILI EKLENDİ)
 # Input mail → Grup mailleri  → Personal mail

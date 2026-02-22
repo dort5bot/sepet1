@@ -34,7 +34,7 @@ router = Router(name="Sgk_processor")
 
 # ===================== FSM =====================
 
-class BlockProcessingStates(StatesGroup):
+class SgkProcessingStates(StatesGroup):
     waiting_for_main = State()   # Ham dosya (TC-İL-TARİH)
     waiting_for_data = State()   # Tel dosyası (TC-TEL)
 
@@ -44,7 +44,7 @@ class BlockProcessingStates(StatesGroup):
 @router.message(Command("sgk"))
 async def cmd_sgk(message: Message, state: FSMContext):
     """Sgk işlemleri başlat"""
-    await state.set_state(BlockProcessingStates.waiting_for_main)
+    await state.set_state(SgkProcessingStates.waiting_for_main)
     await message.answer(
         "📄 **(SGK) data İşlemleri**\n\n"
         "2 dosyada TC=TEL eşleştirir, gruplara atar\n"
@@ -58,7 +58,7 @@ async def cmd_sgk(message: Message, state: FSMContext):
 
 # ===================== HAM DOSYA -  İlk Excel dosyasını işle =====================
 
-@router.message(BlockProcessingStates.waiting_for_main, F.document)
+@router.message(SgkProcessingStates.waiting_for_main, F.document)
 async def handle_main_excel(message: Message, state: FSMContext):
     """İlk Excel dosyasını işle (ham)"""
     if not message.document.file_name.endswith((".xlsx", ".xls")):
@@ -79,7 +79,7 @@ async def handle_main_excel(message: Message, state: FSMContext):
             "main_excel": Path(tmp.name),
             "main_excel_name": main_excel_name  # ✅ Dosya adını kaydet
         })
-        await state.set_state(BlockProcessingStates.waiting_for_data)
+        await state.set_state(SgkProcessingStates.waiting_for_data)
         
         await message.answer(
             f"✅ **İlk dosya alındı: {main_excel_name}**\n\n"
@@ -94,7 +94,7 @@ async def handle_main_excel(message: Message, state: FSMContext):
 
 # ===================== TEL DOSYASI → MERGE → İŞLEME =====================
 
-@router.message(BlockProcessingStates.waiting_for_data, F.document)
+@router.message(SgkProcessingStates.waiting_for_data, F.document)
 async def handle_data_excel(message: Message, state: FSMContext):
     """İkinci Excel dosyasını işle ve süreci başlat"""
     if not message.document.file_name.endswith((".xlsx", ".xls")):
@@ -171,7 +171,7 @@ async def handle_data_excel(message: Message, state: FSMContext):
             await message.answer(f"❌ **İşlem Başarısız**\n\nHata: {error_msg}")
 
     except Exception as e:
-        logger.error(f"Block işlem hatası: {e}", exc_info=True)
+        logger.error(f"Sgk işlem hatası: {e}", exc_info=True)
         await message.answer(f"❌ **İşlem Hatası**\n\n{str(e)}")
 
     finally:

@@ -97,7 +97,7 @@ async def _send_welcome_message(message: Message) -> None:
         "• pdf yada excel dosyasını yükle\n"
         "• İLK dosya TEK , diğerleri topluca yükle, bitince /tamam 'ı tıkla \n\n"
         
-        "⚡️ Sgk: Blok datayı gruplara göndermek\n"
+        "⚡️ Sgk: Ssk datasını gruplara gönderir\n"
         "• Dosya-1(ana) 1.satırda TC-İL-TARİH zorunlu yazılacak.\n"
         "• Dosya-2 (tel) 1.satırda TC-TEL zorunlu yazılacak.\n"
         "• Yükleme bitince sistem otmotik başlayacak.\n\n"
