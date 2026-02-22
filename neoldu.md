@@ -1,4 +1,5 @@
 *--- YÖNETİCİ KOMUTLARI ---
+*--------------------------
 1. Admin:
    1. grupları yönet: grup detay bilgisini görmek için
    2. grup dosyası yükle: mevcut grup bilgisini güncellemek için
@@ -8,7 +9,8 @@
 3. Js : 
 4. notlar: İPTAL - gelişimi zor, şuan kötü
 
-*--- DAĞIRIM KOMUTLARI ---
+*--- DAĞITIM KOMUTLARI ---
+*--------------------------
 1. Kova : il-tarih-tc-tel içeren dosyaları, 
 +İL bilgisine göre gruplar, gönderir
 2. Pex: dosya adına göre gruplara gönderim yapar
