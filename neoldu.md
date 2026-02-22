@@ -17,12 +17,13 @@
  - il bilgisini her satıra ekler
  - oluşan son exceli il bilgisine göre gruplayıp gönderir.
 
-** REVİZYON: 30
-* SGK için gereksiz satır- sutun temizliği eklendi
+** REVİZYON: 30   = ekleme
+* SGK dosyalarında gereksiz satır- sutun temizliği eklendi
 * Gereksiz sayıda tekrarlı satır oluşumu engellenmiş olur
 
 
-** REVİZYON: 30 - 0
-* "blok" temizliği yapıldı
-* blok splitter' yeni yapıda kullanılmıyor. bu işi TCMERGE yapıyor
+** REVİZYON: 30 - 0   = temizlik
+* açıklamalarda "blok >> sgk " dönüşü yapıldı
+* skg işlemleri için 'blok splitter' yeni yapıda kullanılmıyor. bu işi TCMERGE yapıyor
 * Gereksiz kod/ dosya/ içerik açıklamaları temizlendi
+* GİT e yüklendi, oracleye yüklenmedi 22/02/2026
