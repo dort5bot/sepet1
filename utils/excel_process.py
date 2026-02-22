@@ -128,7 +128,7 @@ async def process_excel_task(input_path: Path, user_id: int, main_excel_name: st
             "mail_results": mail_results,
             "mail_stats": calculate_mail_stats(mail_results),
             "input_filename": input_path.name,
-            "main_excel_name": main_excel_name, # ✅ blok ana dosya adı - main_excel_name
+            "main_excel_name": main_excel_name, # ✅ sgk ana dosya adı - main_excel_name
             
             # Şehir bilgisi
             "all_cities": list(all_cities),

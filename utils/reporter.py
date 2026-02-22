@@ -113,9 +113,9 @@ def generate_processing_report(
             f"✅  __ EXCEL İŞLEM RAPORU __\n\n"
             f"⏰  İşlem zamanı: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
             f"📄  Dosya:  {main_excel_name} - {input_filename}",
-            "", # Blok işleminde 1. dosya adı gelir
+            "", # sgk işleminde 1. dosya adı gelir
         ]
-        # Eğer blok işlemiyse ve dosya adları farklıysa, ek bilgi
+        # Eğer sgk işlemiyse ve dosya adları farklıysa, ek bilgi
         # if main_excel_name != input_filename:
         #     report_lines.insert(3, f"📄  İşlenen dosya: {input_filename}")
         #     report_lines.insert(4, "")  # boşluk ekle
