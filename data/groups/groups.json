@@ -323,6 +323,22 @@
         "antalya",
         "muğla"
       ]
+    },
+    {
+      "group_id": "grup_19",
+      "group_name": "alanya_sube",
+      "email_recipients": [
+        "ayselakbulut07@hotmail.com"
+      ],
+      "cities": [
+        "alanya_sube",
+        "antalya",
+        "muğla",
+        "ısparta",
+        "burdur",
+        "anamur",
+        "mersin"
+      ]
     }
   ]
 }
