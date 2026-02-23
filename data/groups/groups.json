@@ -286,30 +286,26 @@
       ]
     },
     {
-      "group_id": "grup_15",
-      "group_name": "emre_oztur_hukuk",
+      "group_id": "grup_17",
+      "group_name": "samsun_sube",
       "email_recipients": [
-        "emre.anadoluexpert@gmail.com"
+        "sevincmeltem139@gmail.com"
       ],
       "cities": [
-        "emre_oztur_hukuk",
-        "istanbul",
-        "kocaeli",
-        "sakarya",
-        "tekirdağ"
-      ]
-    },
-    {
-      "group_id": "grup_16",
-      "group_name": "savas_ugur_hukuk",
-      "email_recipients": [
-        "savas.anadoluexpert@gmail.com"
-      ],
-      "cities": [
-        "savas_ugur_hukuk",
-        "istanbul",
-        "kocaeli",
-        "sakarya"
+        "samsun_sube",
+        "samsun",
+        "ordu",
+        "giresun",
+        "trabzon",
+        "tokat",
+        "sivas",
+        "yozgat",
+        "kayseri",
+        "bolu",
+        "uşak",
+        "amasya",
+        "çorum",
+        "sinop"
       ]
     },
     {
