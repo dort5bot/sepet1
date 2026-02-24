@@ -293,22 +293,30 @@
       ],
       "cities": [
         "samsun_sube",
-        "samsun",
-        "ordu",
-        "giresun",
-        "trabzon",
-        "tokat",
-        "sivas",
-        "yozgat",
-        "kayseri",
-        "bolu",
-        "uşak",
-        "amasya",
-        "çorum",
-        "sinop",
         "afyon",
-        "afyonkarahisar"
+        "afyonkarahisar",
+        "amasya",
+        "antalya",
+        "bolu",
+        "burdur",
+        "çorum",
+        "giresun",
+        "ısparta"
+        "kayseri",
+        "mersin",
+        "muğla",
+        "ordu",
+        "samsun",
+        "sinop",
+        "sivas",
+        "tokat",
+        "trabzon",
+        "uşak",
+        "yozgat"
       ]
+
+
+      
     },
     {
       "group_id": "grup_18",
