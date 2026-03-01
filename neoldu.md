@@ -29,6 +29,7 @@
 * skg işlemleri için 'blok splitter' yeni yapıda kullanılmıyor. bu işi TCMERGE yapıyor
 * Gereksiz kod/ dosya/ içerik açıklamaları temizlendi
 * groups dosyasındaki verilerin alfabetik sıralanması sağlandı
+* groups da grup isimlerinden takılar kaldırıldı.PEX ile doğrudan grup adına dosya gönderme sağlandı
 * GİT e yüklendi 22/02/26,
 * oracleye yüklendi 01/03/2026
 
