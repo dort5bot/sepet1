@@ -28,4 +28,7 @@
 * açıklamalarda "blok >> sgk " dönüşü yapıldı
 * skg işlemleri için 'blok splitter' yeni yapıda kullanılmıyor. bu işi TCMERGE yapıyor
 * Gereksiz kod/ dosya/ içerik açıklamaları temizlendi
-* GİT e yüklendi, oracleye yüklenmedi 22/02/2026
+* groups dosyasındaki verilerin alfabetik sıralanması sağlandı
+* GİT e yüklendi 22/02/26,
+* oracleye yüklendi 01/03/2026
+
