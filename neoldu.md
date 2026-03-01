@@ -25,7 +25,7 @@
 
 
 ** REVİZYON: 30 - 0   = temizlik
-* açıklamalarda "blok >> sgk " dönüşü yapıldı
+* açıklamalarda "blok >> sgk " dönüşü yapıldı (gönderilen dosyalarda sgk2.xlsx olarak görünecek)
 * skg işlemleri için 'blok splitter' yeni yapıda kullanılmıyor. bu işi TCMERGE yapıyor
 * Gereksiz kod/ dosya/ içerik açıklamaları temizlendi
 * groups dosyasındaki verilerin alfabetik sıralanması sağlandı
