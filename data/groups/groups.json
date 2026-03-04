@@ -296,6 +296,7 @@
         "burdur",
         "çorum",
         "giresun",
+        "kastamonu",
         "ısparta",
         "kayseri",
         "mersin",
@@ -339,4 +340,5 @@
       ]
     }
   ]
+
 }
