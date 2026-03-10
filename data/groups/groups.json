@@ -98,6 +98,8 @@
       ],
       "cities": [
         "bursasb",
+        "afyon",
+        "afyonkarahisar",
         "balıkesir",
         "bursa",
         "çanakkale",
@@ -342,3 +344,4 @@
   ]
 
 }
+
