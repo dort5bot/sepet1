@@ -1,0 +1,289 @@
+{
+  "groups": [
+    {
+      "group_id": "grup_0",
+      "group_name": "grup_0",
+      "email_recipients": [
+        "anadolulistehdr@gmail.com"
+      ],
+      "cities": []
+    },
+    {
+      "group_id": "grup_1",
+      "group_name": "antalyasb",
+      "email_recipients": [
+        "anadoluexpert.nurhan@gmail.com"
+      ],
+      "cities": [
+        "antalyasb",
+        "adana",
+        "afyon",
+        "afyonkarahisar",
+        "aksaray",
+        "ankara",
+        "antalya",
+        "burdur",
+        "çankırı",
+        "ısparta",
+        "karaman",
+        "kayseri",
+        "kırıkkale",
+        "kırşehir",
+        "konya",
+        "Mersin",
+        "Osmaniye",
+        "uşak"
+      ]
+    },
+    {
+      "group_id": "grup_2",
+      "group_name": "mersinsb",
+      "email_recipients": [
+        "ortadogudanismanlikk@gmail.com"
+      ],
+      "cities": [
+        "mersinsb",
+        "adana",
+        "adıyaman",
+        "batman",
+        "bingöl",
+        "bitlis",
+        "diyarbakır",
+        "elazığ",
+        "gaziantep",
+        "hakkari",
+        "hatay",
+        "içel",
+        "kahramanmaraş",
+        "kilis",
+        "malatya",
+        "maraş",
+        "mardin",
+        "mersin",
+        "muş",
+        "osmaniye",
+        "siirt",
+        "şanlıurfa",
+        "şırnak",
+        "urfa",
+        "van"
+      ]
+    },
+    {
+      "group_id": "grup_3",
+      "group_name": "izmirsb",
+      "email_recipients": [
+        "sinansevimli04@gmail.com",
+        "anadoluexper08@gmail.com",
+        "ceylanizmiranadolu@gmail.com"
+      ],
+      "cities": [
+        "izmirsb",
+        "afyon",
+        "afyonkarahisar",
+        "aydın",
+        "bodrum",
+        "çanakkale",
+        "fethiye",
+        "izmir",
+        "manisa",
+        "marmaris",
+        "milas",
+        "muğla",
+        "uşak"
+      ]
+    },
+    {
+      "group_id": "grup_4",
+      "group_name": "bursasb",
+      "email_recipients": [
+        "hasaranalizmerkezi16@gmail.com"
+      ],
+      "cities": [
+        "bursasb",
+        "Afyon",
+        "Afyonkarahisar",
+        "balıkesir",
+        "bursa",
+        "çanakkale",
+        "düzce",
+        "kocaeli",
+        "sakarya",
+        "tekirdağ",
+        "yalova"
+      ]
+    },
+    {
+      "group_id": "grup_5",
+      "group_name": "balıkesirsb",
+      "email_recipients": [
+        "sevketozel145@gmail.com"
+      ],
+      "cities": [
+        "balıkesirsb",
+        "balıkesir",
+        "çanakkale"
+      ]
+    },
+    {
+      "group_id": "grup_6",
+      "group_name": "karadenizsb",
+      "email_recipients": [
+        "batikaradenizemel@gmail.com"
+      ],
+      "cities": [
+        "karadenizsb",
+        "ardahan",
+        "artvin",
+        "bayburt",
+        "çankırı",
+        "erzincan",
+        "erzurum",
+        "giresun",
+        "gümüşhane",
+        "ordu",
+        "rize",
+        "samsun",
+        "sinop",
+        "sivas",
+        "tokat",
+        "trabzon"
+      ]
+    },
+    {
+      "group_id": "grup_7",
+      "group_name": "erzincansb",
+      "email_recipients": [
+        "serkan.ovayurt1903@gmail.com"
+      ],
+      "cities": [
+        "erzincansb",
+        "ağrı",
+        "ardahan",
+        "bingöl",
+        "erzincan",
+        "erzurum",
+        "giresun",
+        "gümüşhane",
+        "ığdır",
+        "kars",
+        "ordu",
+        "sivas",
+        "şırnak",
+        "tokat",
+        "tunceli",
+        "van"
+      ]
+    },
+    {
+      "group_id": "grup_8",
+      "group_name": "eskişehirsb",
+      "email_recipients": [
+        "anadolugrupesk@gmail.com"
+      ],
+      "cities": [
+        "eskişehirsb",
+        "afyon",
+        "afyonkarahisar",
+        "ankara",
+        "bilecik",
+        "eskişehir",
+        "uşak"
+      ]
+    },
+    {
+      "group_id": "grup_9",
+      "group_name": "kütahyasb",
+      "email_recipients": [
+        "anadoluhasarnursen@gmail.com"
+      ],
+      "cities": [
+        "kütahyasb",
+        "afyon",
+        "afyonkarahisar",
+        "ankara",
+        "bilecik",
+        "bozüyük",
+        "eskişehir",
+        "kütahya",
+        "nevşehir",
+        "niğde",
+        "uşak"
+      ]
+    },
+    {
+      "group_id": "grup_10",
+      "group_name": "corumsb",
+      "email_recipients": [
+        "corumhasar19@gmail.com"
+      ],
+      "cities": [
+        "corumsb",
+        "amasya",
+        "çorum",
+        "sivas",
+        "tokat",
+        "yozgat"
+      ]
+    },
+    {
+      "group_id": "grup_11",
+      "group_name": "denizlisb",
+      "email_recipients": [
+        "osman.anadoluhasar@gmail.com"
+      ],
+      "cities": [
+        "denizlisb",
+        "afyon",
+        "afyonkarahisar",
+        "aydın",
+        "bodrum",
+        "burdur",
+        "denizli",
+        "fethiye",
+        "ısparta",
+        "izmir",
+        "manisa",
+        "marmaris",
+        "milas",
+        "muğla",
+        "uşak"
+      ]
+    },
+    {
+      "group_id": "grup_12",
+      "group_name": "akhisarsb",
+      "email_recipients": [
+        "halilakhisar@gmail.com",
+        "malaksibel@gmail.com"
+      ],
+      "cities": [
+        "akhisarsb",
+        "manisa"
+      ]
+    },
+    {
+      "group_id": "grup_13",
+      "group_name": "düzcesb",
+      "email_recipients": [
+        "omurburhankorkmaz@anadoluexpert.com"
+      ],
+      "cities": [
+        "düzcesb",
+        "bartın",
+        "bolu",
+        "düzce",
+        "edirne",
+        "istanbul",
+        "karabük",
+        "kırklareli",
+        "kocaeli",
+        "sakarya",
+        "sinop",
+        "tekirdağ",
+        "yalova",
+        "zonguldak"
+      ]
+    }
+  ]
+}
