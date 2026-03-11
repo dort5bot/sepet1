@@ -285,6 +285,65 @@
         "yalova",
         "zonguldak"
       ]
+    },
+    {
+      "group_id": "grup_17",
+      "group_name": "samsunsb",
+      "email_recipients": [
+        "sevincmeltem139@gmail.com"
+      ],
+      "cities": [
+        "samsunsb",
+        "afyon",
+        "afyonkarahisar",
+        "amasya",
+        "antalya",
+        "bolu",
+        "burdur",
+        "çorum",
+        "giresun",
+        "ısparta",
+        "kastamonu",
+        "kayseri",
+        "mersin",
+        "muğla",
+        "ordu",
+        "samsun",
+        "sinop",
+        "sivas",
+        "tokat",
+        "trabzon",
+        "uşak",
+        "yozgat"
+      ]
+    },
+    {
+      "group_id": "grup_18",
+      "group_name": "atillasb",
+      "email_recipients": [
+        "atisigorta07@gmail.com"
+      ],
+      "cities": [
+        "atillasb",
+        "antalya",
+        "muğla"
+      ]
+    },
+    {
+      "group_id": "grup_19",
+      "group_name": "alanyasb",
+      "email_recipients": [
+        "ayselakbulut07@hotmail.com"
+      ],
+      "cities": [
+        "alanyasb",
+        "Anamur",
+        "antalya",
+        "burdur",
+        "ısparta",
+        "mersin",
+        "muğla"
+      ]
     }
   ]
 }
