@@ -196,12 +196,10 @@ async def handle_admin_callback(callback: CallbackQuery, state: FSMContext) -> N
         await _send_admin_panel(callback.message)
     elif action == "admin_refresh_groups":
         await _refresh_groups(callback)
-    elif action == "admin_group_details":
-        await _show_group_details(callback)
+    elif action == "admin_group_details" or action.startswith("admin_group_detail"):
+        await _show_group_details(callback)  
     
     await callback.answer()
-
-
 
 
 # ✅ YARDIMCI FONKSİYONLAR (Aynı kalıyor)
@@ -294,7 +292,6 @@ async def _show_admin_stats(message: Message) -> None:
     except Exception as e:
         logger.error(f"Birleşik istatistik hatası: {e}", exc_info=True)
         await message.answer("❌ İstatistikler alınamadı.")
-
 
 
 # Admin loglarını gösterir
@@ -417,10 +414,10 @@ async def _refresh_groups(callback: CallbackQuery) -> None:
         await callback.message.edit_text("❌ Gruplar yenilenirken hata oluştu.")
 
 # grup bilgisi
+# 1- tam liste gösterir
 async def _show_group_details(callback: CallbackQuery) -> None:
-    """Grup detaylarını gösterir"""
+    """Grup detaylarını gösterir - Tüm şehirler tam görünür"""
     try:
-        # ✅ GroupConfig objelerini dict'e çevir
         groups_dict = group_manager.groups
         groups_list = [asdict(group_config) for group_config in groups_dict.values()]
         
@@ -435,40 +432,116 @@ async def _show_group_details(callback: CallbackQuery) -> None:
             group_name = group.get("group_name")
             cities = group.get("cities", [])
             emails = group.get("email_recipients", [])
-            # ❌ is_active kaldırıldı - status göstergesi kaldırıldı
             
-            cities_display = ", ".join(cities[:38])
-            if len(cities) > 38:
-                cities_display += f" ... (+{len(cities)-8})"
-
-            emails_display = ", ".join(emails[:3])
-            if len(emails) > 3:
-                emails_display += f" ... (+{len(emails)-3})"
+            # ✅ TÜM ŞEHİRLERİ GÖSTER - KISALTMA YOK
+            cities_display = ", ".join(cities) if cities else "Şehir yok"
             
-            # ✅ DÜZELTME: is_active ve status kaldırıldı
+            emails_display = ", ".join(emails) if emails else "E-posta yok"
+            
             response_lines.append(
                 f"{i}. <b>{group_name}</b>\n"
                 f"🆔 <code>{group_id}</code>\n"
-                f"🏙️ {cities_display}\n"
-                f"📧 {emails_display}\n"
+                f"📧 ({len(emails)}): {emails_display}\n"
+                f"🏙️ ({len(cities)}): {cities_display}\n"    #alt satır için araya \n koy
             )
 
         response = "\n".join(response_lines)
+        
+        # Mesaj çok uzunsa parçalara böl
+        if len(response) > 4000:
+            await callback.message.edit_text("⚠️ Grup detayları çok uzun, parçalar halinde gönderiliyor...")
+            
+            # Parçalara böl
+            chunks = []
+            current_chunk = ["👥 <b>Grup Detayları (Sayfa 1)</b>\n"]
+            page = 1
+            
+            for line in response_lines[1:]:  # Başlık hariç
+                if len("\n".join(current_chunk)) + len(line) > 3800:
+                    chunks.append("\n".join(current_chunk))
+                    page += 1
+                    current_chunk = [f"👥 <b>Grup Detayları (Sayfa {page})</b>\n"]
+                current_chunk.append(line)
+            
+            if current_chunk:
+                chunks.append("\n".join(current_chunk))
+            
+            # İlk mesajı düzenle, diğerlerini yeni mesaj olarak gönder
+            await callback.message.edit_text(chunks[0], parse_mode="HTML")
+            for chunk in chunks[1:]:
+                await callback.message.answer(chunk, parse_mode="HTML")
+        else:
+            await callback.message.edit_text(response, parse_mode="HTML")
+            
+        # Geri dönüş butonu
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Geri", callback_data="admin_refresh_groups")]
+            ]
+        )
+        # Eğer mesaj düzenlenmediyse butonu ekle
+        if len(response) <= 4000:
+            await callback.message.edit_text(response, reply_markup=keyboard, parse_mode="HTML")
+        
+    except Exception as e:
+        logger.error(f"Grup detayları hatası: {e}")
+        await callback.message.edit_text(f"❌ Hata: {str(e)}")
 
+
+# 2- her grup bağımsız mesaj olarak gösterir
+async def _2show_group_details(callback: CallbackQuery) -> None:
+    """Grup detaylarını gösterir - Düzenli çok satırlı gösterim"""
+    try:
+        groups_dict = group_manager.groups
+        groups_list = [asdict(group_config) for group_config in groups_dict.values()]
+        
+        if not groups_list:
+            await callback.message.edit_text("❌ Hiç grup bulunamadı. JSON grup dosyası yüklenmeli")
+            return
+        
+        for i, group in enumerate(groups_list, 1):
+            group_id = group.get("group_id")
+            group_name = group.get("group_name")
+            cities = group.get("cities", [])
+            emails = group.get("email_recipients", [])
+            
+            # Şehirleri 10'ar 10'ar grupla
+            city_lines = []
+            for j in range(0, len(cities), 10):
+                chunk = cities[j:j+10]
+                city_lines.append(f"   {', '.join(chunk)}")
+            
+            cities_display = "\n".join(city_lines) if city_lines else "   Şehir yok"
+            emails_display = ", ".join(emails) if emails else "E-posta yok"
+            
+            response = (
+                f"{i}. <b>{group_name}</b>\n"
+                f"🆔 <code>{group_id}</code>\n"
+                f"📧 Alıcılar ({len(emails)}): {emails_display}\n"
+                f"🏙️ Şehirler ({len(cities)}):\n{cities_display}\n"
+                
+            )
+            
+            # Her grup için ayrı mesaj gönder
+            if i == 1:
+                await callback.message.edit_text(response, parse_mode="HTML")
+            else:
+                await callback.message.answer(response, parse_mode="HTML")
+        
+        # Son mesaja geri dönüş butonu ekle
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="◀️ Geri", callback_data="admin_groups")]
             ]
         )
-        # ✅ HTML parse mode kullan
-        await callback.message.edit_text(response, reply_markup=keyboard, parse_mode="HTML")
-
+        await callback.message.answer("Grup listesi sonu.", reply_markup=keyboard)
+        
     except Exception as e:
         logger.error(f"Grup detayları hatası: {e}")
         await callback.message.edit_text(f"❌ Hata: {str(e)}")
 
+       
 # ✅ STATE HANDLER'LAr
-
 # Grup JSON dosyasını işler
 @router.message(AdminStates.waiting_for_group_file, F.document)
 async def handle_group_file_upload(message: Message, state: FSMContext) -> None:
@@ -526,7 +599,6 @@ async def handle_group_file_upload(message: Message, state: FSMContext) -> None:
     finally:
         await state.clear()
 
-
  
 # JSON yükleme > JSON dışı her şey → iptal
 @router.message(AdminStates.waiting_for_group_file)
@@ -539,8 +611,6 @@ async def cancel_group_file_wait(message: Message, state: FSMContext):
     # İptal işlemi
     await state.clear()
     await message.answer("❌ Grup yükleme işlemi iptal edildi.")
-
-
 
 
 # Toplu mesaj gönderimini işler
@@ -573,7 +643,6 @@ async def handle_broadcast_message(message: Message, state: FSMContext) -> None:
         await message.answer("❌ Toplu mesaj gönderilemedi.")
     finally:
         await state.clear()
-
 
 
 @router.message(AdminStates.waiting_for_group_file)
