@@ -476,7 +476,7 @@ async def _show_group_details(callback: CallbackQuery) -> None:
         # Geri dönüş butonu
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Geri", callback_data="admin_refresh_groups")]
+                [InlineKeyboardButton(text="◀️ Yenile", callback_data="admin_refresh_groups")]
             ]
         )
         # Eğer mesaj düzenlenmediyse butonu ekle
