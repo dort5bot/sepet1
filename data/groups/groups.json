@@ -20,6 +20,7 @@
         "Afyon",
         "Afyonkarahisar",
         "Aksaray",
+        "Alanya",
         "Ankara",
         "Antalya",
         "Burdur",
@@ -80,6 +81,7 @@
         "izmirsb",
         "Afyon",
         "Afyonkarahisar",
+        "Alanya",
         "Ankara",
         "Antalya",
         "Aydın",
@@ -269,7 +271,7 @@
       "group_id": "grup_12",
       "group_name": "akhisarsb",
       "email_recipients": [
-        "halilhasaranaliz@gmail.com",
+        "halilakhisar@gmail.com",
         "malaksibel@gmail.com"
       ],
       "cities": [
@@ -319,6 +321,7 @@
       ],
       "cities": [
         "atillasb",
+        "Alanya",
         "Antalya",
         "İçel",
         "Mersin",
@@ -338,6 +341,7 @@
         "Afyon",
         "Ağrı",
         "Aksaray",
+        "Alanya",
         "Amasya",
         "Ankara",
         "Antalya",
