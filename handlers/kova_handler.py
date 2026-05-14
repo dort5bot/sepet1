@@ -152,6 +152,7 @@ async def cmd_process(message: Message, state: FSMContext):
     """
     await state.set_state(ProcessingStates.waiting_for_file)
     await message.answer(
+        "📌 (Zorunlu) 1.satırda İL, TARİH yazılmalıdır\n"
         "📤 İşlemek istediğin Excel dosyasını gönder...\n"
         "🛑 İptal için tıkla: '/iptal' veya bas: DUR"
     )
